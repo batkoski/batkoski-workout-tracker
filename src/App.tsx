@@ -89,7 +89,7 @@ const WEEK: WeekDay[] = [
 ];
 
 const DAY_MAP: { [dow: number]: number | null } = {
-  0: null, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: null,
+  0: null, 1: 0, 2: 1, 3: 2, 4: 4, 5: 3, 6: null,
 };
 
 const PROGRAM_DAYS: ProgramDay[] = [
