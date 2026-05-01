@@ -289,13 +289,7 @@ function sendNotification(title: string, body: string): void {
   }
 }
 
-async function requestNotifPermission(): Promise<NotificationPermission | "unsupported"> {
-  if (typeof Notification === "undefined") return "unsupported";
-  if (Notification.permission === "granted") return "granted";
-  if (Notification.permission === "denied") return "denied";
-  const result = await Notification.requestPermission();
-  return result;
-}
+
 
 // ── TIMER HOOK ────────────────────────────────────────────────────────────────
 
@@ -347,9 +341,10 @@ interface SetModalProps {
   suggested: SetData | null;
   onSave: (data: SetData) => void;
   onClose: () => void;
+  exerciseName: string;
 }
 
-function SetModal({ setNum, totalSets, suggested, onSave, onClose }: SetModalProps) {
+function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName }: SetModalProps) {
   const [weight, setWeight] = useState<string | null>(null);
   const [reps,   setReps]   = useState<string | null>(null);
 
@@ -376,8 +371,11 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose }: SetModalPro
         width: "100%", maxWidth: "480px",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-          <div style={{ color: "#5A5248", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>
-            LOG SET {setNum} <span style={{ color: "#7A7268" }}>/ {totalSets}</span>
+          <div>
+            <div style={{ color: "#2A2420", fontSize: "14px", fontWeight: 700, marginBottom: "4px" }}>{exerciseName}</div>
+            <div style={{ color: "#5A5248", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>
+              LOG SET {setNum} <span style={{ color: "#7A7268" }}>/ {totalSets}</span>
+            </div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#6A6258", fontSize: "20px", cursor: "pointer", padding: "0 4px" }}>×</button>
         </div>
@@ -622,6 +620,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
       {modal !== null && (
         <SetModal
           setNum={modal} totalSets={ex.sets} suggested={getSuggested(modal)}
+          exerciseName={ex.name}
           onSave={data => { onLogSet(exIdx, modal, data); setModal(null); onStartTimer(); }}
           onClose={() => setModal(null)}
         />
@@ -944,7 +943,6 @@ export default function App() {
   const [allLogs, setAllLogs] = useState<AllLogs>({});
   const [coreLogs, setCoreLogs] = useState<CoreLogs>({});
   const [showExport, setShowExport] = useState(false);
-  const [notifStatus, setNotifStatus] = useState<string>("unknown");
   const [activeExIdx, setActiveExIdx] = useState(0);
 
   // Load from localStorage on mount
@@ -955,7 +953,6 @@ export default function App() {
       const coreStored = localStorage.getItem(CORE_LOG_KEY);
       if (coreStored) setCoreLogs(JSON.parse(coreStored) as CoreLogs);
     } catch (_) {}
-    if (typeof Notification !== "undefined") setNotifStatus(Notification.permission);
   }, []);
 
   // Persist to localStorage whenever logs change
@@ -1070,11 +1067,6 @@ export default function App() {
   const todayCoreChecked = coreLogs[todayKey()] || {};
   const coreFreq = getCoreFreq();
 
-  const handleNotifRequest = async () => {
-    const result = await requestNotifPermission();
-    setNotifStatus(result);
-  };
-
   return (
     <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#D8D2C8", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 16px" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Space+Mono:wght@700&display=swap" rel="stylesheet" />
@@ -1085,12 +1077,12 @@ export default function App() {
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
         {/* Scrollable content area */}
-        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", paddingBottom: "48px" }}>
 
       {/* ── HEADER ── */}
       <div style={{ padding: "28px 20px 0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
-          <span style={{ color: "#7A7268", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>ELI · WEEK 6+</span>
+          <span style={{ color: "#7A7268", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>ELI WORKOUT TRACKER</span>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             <span style={{ color: "#7A7268", fontSize: "11px" }}>{dateStr}</span>
             <button onClick={() => setShowExport(true)} style={{
@@ -1109,21 +1101,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── NOTIFICATION PROMPT ── */}
-      {notifStatus === "default" && !isRestDay && !day?.isPool && (
-        <div style={{ margin: "16px 20px 0", background: "#EDE8DF", border: "1px solid #D0C8B0", borderRadius: "12px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ color: "#B85C38", fontSize: "12px", fontWeight: 700 }}>Enable Notifications</div>
-            <div style={{ color: "#8A7A70", fontSize: "11px", marginTop: "2px" }}>Rest timer + next exercise alerts</div>
-          </div>
-          <button onClick={handleNotifRequest} style={{
-            background: "#B85C38", border: "none", borderRadius: "8px",
-            color: "#F5F0E8", fontSize: "11px", fontWeight: 700,
-            padding: "7px 14px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-            letterSpacing: "0.06em", flexShrink: 0,
-          }}>ALLOW</button>
-        </div>
-      )}
+
 
       {/* ── DAY STRIP ── */}
       <div style={{ display: "flex", gap: "5px", padding: "16px 20px 0", overflowX: "auto", scrollbarWidth: "none" }}>
