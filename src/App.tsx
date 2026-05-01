@@ -1036,8 +1036,6 @@ export default function App() {
     ? day.exercises.reduce((a, _ex, i) => a + Object.keys(getExLogs(i)).length, 0)
     : 0;
 
-  const dateStr = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-
   // Date for whichever day is selected in the strip
   const activeDayDate = new Date();
   activeDayDate.setDate(activeDayDate.getDate() + (activeDow - todayDow));
