@@ -1,73 +1,41 @@
-# React + TypeScript + Vite
+# Eli's Workout Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A personal fitness tracking app built with React + TypeScript. Designed to feel like a native mobile app — tracks sets, weight, and reps across a 5-day training program, with a built-in rest timer and Claude export for progress analysis.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **5-day program** — Push, Core/Mobility, Pull, Lower+Core, Core/Mobility, with rest days on weekends
+- **Set logging** — tap a set to log weight + reps; previous session values pre-fill as suggestions
+- **90s rest timer** — starts automatically after each set, with browser notifications for next exercise
+- **Core exercise pool** — pick-your-own exercises on mobility days, with 4-week frequency tracking to avoid overuse
+- **PM stretch checklists** — collapsible, with context for the next day's training
+- **Export for Claude** — copies your full workout log as text to paste into Claude for progress analysis and recommendations
+- **Persistent storage** — all data saved to localStorage, survives page refreshes and browser restarts
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React 19 + TypeScript
+- Vite
+- Tailwind CSS (layout shell only — app UI uses inline styles)
+- Deployed via GitHub Pages
 
-## Expanding the ESLint configuration
+## Local development
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Deploy
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run deploy
 ```
+
+Deploys to GitHub Pages via the `gh-pages` branch. Make sure the repo has Pages enabled (Settings → Pages → source: `gh-pages` branch).
+
+## Usage on mobile
+
+Open the GitHub Pages URL in Safari on iPhone, tap the share button → **Add to Home Screen**. The app will sit on your home screen and behave like a native app. localStorage persists between sessions on that device.
+
+To sync progress across devices or analyze trends, use the **Export** button to copy your log and paste it into a Claude chat.
