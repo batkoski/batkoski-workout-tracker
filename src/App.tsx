@@ -970,7 +970,6 @@ export default function App() {
   const accent = day?.color || "#6A6258";
 
   const isToday = activeDow === todayDow;
-  void isToday; // used conceptually; writes only happen via dayStorageKey
   const dayStorageKey = `${todayKey()}|${programDayIdx}`;
 
   const getDayLogs = (): DayLogs => allLogs[dayStorageKey] || {};
@@ -1039,6 +1038,12 @@ export default function App() {
 
   const dateStr = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
+  // Date for whichever day is selected in the strip
+  const activeDayDate = new Date();
+  activeDayDate.setDate(activeDayDate.getDate() + (activeDow - todayDow));
+  const activeDateStr = activeDayDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  const activeDateLabel = isToday ? `TODAY · ${activeDateStr}` : activeDateStr;
+
   const nextEx = day && !day.isPool ? day.exercises[activeExIdx + 1] : null;
 
   const handleCoreToggle = (exerciseName: string) => {
@@ -1084,7 +1089,7 @@ export default function App() {
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
           <span style={{ color: "#7A7268", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>ELI WORKOUT TRACKER</span>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <span style={{ color: "#7A7268", fontSize: "11px" }}>{dateStr}</span>
+            <span style={{ color: "#7A7268", fontSize: "11px" }}>{activeDateLabel}</span>
             <button onClick={() => setShowExport(true)} style={{
               background: "#DDD7CC", border: "1px solid #D8D2C8", borderRadius: "6px",
               color: "#5A5248", fontSize: "10px", padding: "4px 10px", cursor: "pointer",
@@ -1092,7 +1097,6 @@ export default function App() {
             }}>EXPORT</button>
           </div>
         </div>
-        <div style={{ color: "#7A7268", fontSize: "12px", letterSpacing: "0.08em", marginBottom: "2px" }}>TODAY</div>
         <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "32px", fontWeight: 700, lineHeight: 1, color: isRestDay ? "#7A7268" : accent, marginBottom: "5px" }}>
           {isRestDay ? "REST DAY" : day.title}
         </div>
