@@ -1068,16 +1068,16 @@ export default function App() {
   const coreFreq = getCoreFreq();
 
   return (
-    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#D8D2C8", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 16px" }}>
+    <div className="app-outer" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Space+Mono:wght@700&display=swap" rel="stylesheet" />
-      {/* Phone shell — fixed iPhone Pro Max proportions: 430×932 logical px */}
-      <div style={{ width: "430px", height: "932px", flexShrink: 0, background: "#F5F0E8", borderRadius: "52px", border: "1px solid #C8C0B0", overflow: "hidden", color: "#2A2420", position: "relative", boxShadow: "0 8px 40px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.6)" }}>
+      {/* Phone shell — fixed iPhone Pro Max proportions on desktop, full-screen on mobile */}
+      <div className="app-shell">
 
       {/* ── INNER LAYOUT: scrollable content + pinned timer ── */}
-      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div className="app-inner">
 
         {/* Scrollable content area */}
-        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", paddingBottom: "48px" }}>
+        <div className="app-scroll">
 
       {/* ── HEADER ── */}
       <div style={{ padding: "28px 20px 0" }}>
