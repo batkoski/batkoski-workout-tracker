@@ -486,15 +486,26 @@ function WarmupSection({ items, accent }: WarmupSectionProps) {
           display: "flex", alignItems: "center", justifyContent: "space-between",
           gap: "12px", transition: "all 0.3s",
         }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", flex: 1 }}>
-            {items.map(w => (
-              <span key={w} style={{
-                color: done ? "#8A7A70" : "#5A5248", fontSize: "12px",
-                textDecoration: done ? "line-through" : "none",
-                transition: "all 0.3s",
+          <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+            {items.map((w, i) => (
+              <div key={w} style={{
+                display: "flex", alignItems: "center", gap: "8px",
+                padding: "6px 0",
+                borderTop: i > 0 ? `1px solid ${done ? "#D8D0C0" : "#D8D2C8"}` : "none",
               }}>
-                {w}{" "}
-              </span>
+                <span style={{
+                  width: "5px", height: "5px", borderRadius: "50%", flexShrink: 0,
+                  background: done ? "#8A7A70" : accent,
+                  opacity: done ? 0.4 : 0.6,
+                }} />
+                <span style={{
+                  color: done ? "#8A7A70" : "#5A5248", fontSize: "12px",
+                  textDecoration: done ? "line-through" : "none",
+                  transition: "all 0.3s",
+                }}>
+                  {w}
+                </span>
+              </div>
             ))}
           </div>
           <button
@@ -509,6 +520,67 @@ function WarmupSection({ items, accent }: WarmupSectionProps) {
           >
             {done && <span style={{ color: "#F5F0E8", fontSize: "14px", fontWeight: 700 }}>✓</span>}
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── WORKOUT SECTION ──────────────────────────────────────────────────────────
+
+interface WorkoutSectionProps {
+  exercises: Exercise[];
+  accent: string;
+  doneSets: number;
+  totalSets: number;
+  activeExIdx: number;
+  getExLogs: (exIdx: number) => { [setNum: number]: SetData };
+  getLastSessionExLogs: (exIdx: number) => { [setNum: number]: SetData } | null;
+  onLogSet: (exIdx: number, setNum: number, data: SetData) => void;
+  onStartTimer: (exIdx: number, setNum: number) => void;
+  onStopTimer: () => void;
+}
+
+function WorkoutSection({ exercises, accent, doneSets, totalSets, activeExIdx, getExLogs, getLastSessionExLogs, onLogSet, onStartTimer, onStopTimer }: WorkoutSectionProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const allDone = doneSets === totalSets && totalSets > 0;
+
+  return (
+    <div style={{ marginBottom: "12px" }}>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          width: "100%", background: "none", border: "none", cursor: "pointer",
+          padding: "0 0 8px 0",
+        }}
+      >
+        <span style={{ color: allDone ? "#2E6B4A" : "#7A7268", fontSize: "11px", letterSpacing: "0.1em", fontWeight: 700 }}>
+          WORKOUT
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {allDone && <span style={{ color: "#2E6B4A", fontSize: "11px", fontWeight: 700 }}>✓ DONE</span>}
+          {!allDone && doneSets > 0 && (
+            <span style={{ color: "#7A7268", fontSize: "11px", fontFamily: "'Space Mono', monospace" }}>{doneSets}/{totalSets}</span>
+          )}
+          <span style={{ color: "#7A7268", fontSize: "14px" }}>{collapsed ? "+" : "−"}</span>
+        </div>
+      </button>
+
+      {!collapsed && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {exercises.map((ex, exIdx) => (
+            <ExerciseCard
+              key={exIdx} ex={ex} exIdx={exIdx} accent={accent}
+              logs={getExLogs(exIdx)}
+              lastSessionLogs={getLastSessionExLogs(exIdx)}
+              isCurrent={exIdx === activeExIdx}
+              isNext={exIdx === activeExIdx + 1}
+              onLogSet={onLogSet}
+              onStartTimer={onStartTimer}
+              onStopTimer={onStopTimer}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -533,6 +605,7 @@ interface ExerciseCardProps {
 function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isNext, onLogSet, onStartTimer, onStopTimer }: ExerciseCardProps) {
   const [modal, setModal] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [doneCollapsed, setDoneCollapsed] = useState(true);
   const completedSets = Object.keys(logs).length;
   const allDone = completedSets >= ex.sets;
 
@@ -572,9 +645,39 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
 
         {allDone ? (
           /* ── MINIMIZED DONE STATE ── */
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ color: "#2E6B4A", fontWeight: 700, fontSize: "13px" }}>✓ {ex.name}</span>
-            <span style={{ color: "#2E6B4A", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em" }}>DONE</span>
+          <div
+            onClick={() => setDoneCollapsed(c => !c)}
+            style={{ cursor: "pointer" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "#2E6B4A", fontWeight: 700, fontSize: "13px" }}>✓ {ex.name}</span>
+              <span style={{ color: "#2E6B4A", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em" }}>
+                {doneCollapsed ? "DONE" : "−"}
+              </span>
+            </div>
+            {!doneCollapsed && (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end", marginTop: "12px", justifyContent: "center" }}>
+                {Array.from({ length: ex.sets }).map((_, i) => {
+                  const setNum = i + 1;
+                  const log = logs[setNum];
+                  return (
+                    <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                      <div style={{
+                        width: "46px", height: "46px", borderRadius: "50%",
+                        background: "#2E6B4A", border: `2px solid #2E6B4A`,
+                        color: "#fff", fontSize: "16px", fontWeight: 700,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>✓</div>
+                      {log && (log.weight || log.reps) && (
+                        <span style={{ color: "#4A7A62", fontSize: "10px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
+                          {log.weight}{log.reps ? `×${log.reps}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -625,7 +728,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
               </span>
             </div>
 
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center" }}>
               {Array.from({ length: ex.sets }).map((_, i) => {
                 const setNum = i + 1;
                 const log = logs[setNum];
@@ -697,7 +800,6 @@ function PMSection({ stretches, nextDayTitle }: PMSectionProps) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "14px" }}>🌙</span>
           <span style={{ color: allDone ? "#4A7FA5" : "#5A5248", fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em" }}>
             PM STRETCHES
           </span>
@@ -1197,12 +1299,12 @@ export default function App() {
         <div style={{ padding: "14px 20px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
             <span style={{ color: "#7A7268", fontSize: "11px", letterSpacing: "0.08em", fontWeight: 700 }}>SETS COMPLETED</span>
-            <span style={{ color: doneSets === totalSets ? "#7EB8D4" : "#7A7268", fontSize: "11px", fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
-              {doneSets} / {totalSets}
+            <span style={{ color: doneSets === totalSets ? "#2E6B4A" : "#7A7268", fontSize: "11px", fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+              {doneSets} / {totalSets} · {totalSets ? Math.round((doneSets / totalSets) * 100) : 0}%
             </span>
           </div>
           <div style={{ background: "#DDD7CC", borderRadius: "3px", height: "2px" }}>
-            <div style={{ height: "100%", borderRadius: "3px", background: doneSets === totalSets ? "#7EB8D4" : accent, width: `${totalSets ? (doneSets / totalSets) * 100 : 0}%`, transition: "width 0.4s ease" }} />
+            <div style={{ height: "100%", borderRadius: "3px", background: doneSets === totalSets ? "#2E6B4A" : accent, width: `${totalSets ? (doneSets / totalSets) * 100 : 0}%`, transition: "width 0.4s ease" }} />
           </div>
         </div>
       )}
@@ -1233,20 +1335,18 @@ export default function App() {
             {day.warmup.length > 0 && (
               <WarmupSection items={day.warmup} accent={accent} />
             )}
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {day.exercises.map((ex, exIdx) => (
-                <ExerciseCard
-                  key={exIdx} ex={ex} exIdx={exIdx} accent={accent}
-                  logs={getExLogs(exIdx)}
-                  lastSessionLogs={getLastSessionExLogs(exIdx)}
-                  isCurrent={exIdx === activeExIdx}
-                  isNext={exIdx === activeExIdx + 1}
-                  onLogSet={handleLogSet}
-                  onStartTimer={handleStartTimer}
-                  onStopTimer={timer.stop}
-                />
-              ))}
-            </div>
+            <WorkoutSection
+              exercises={day.exercises}
+              accent={accent}
+              doneSets={doneSets}
+              totalSets={totalSets}
+              activeExIdx={activeExIdx}
+              getExLogs={getExLogs}
+              getLastSessionExLogs={getLastSessionExLogs}
+              onLogSet={handleLogSet}
+              onStartTimer={handleStartTimer}
+              onStopTimer={timer.stop}
+            />
             {doneSets === totalSets && totalSets > 0 && (
               <div style={{ marginTop: "20px", padding: "20px 16px", background: "#E8E6E2", border: "1px solid #4A7A62", borderRadius: "14px", textAlign: "center" }}>
                 <div style={{ fontSize: "28px", marginBottom: "8px" }}>💪</div>
