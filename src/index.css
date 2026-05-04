@@ -61,7 +61,22 @@
   }
 }
 
-/* ── PHONE SHELL (desktop preview) ── */
+/* ── SET MODAL: absolute on desktop (stays in card), fixed on mobile (clears keyboard) ── */
+.set-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(60,50,40,0.7);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 200;
+}
+
+@media (max-width: 768px) {
+  .set-modal-overlay {
+    position: fixed;
+  }
+}
 .app-outer {
   font-family: 'DM Sans', sans-serif;
   background: #D8D2C8;

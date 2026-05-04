@@ -303,26 +303,33 @@ interface TimerHook {
 function useTimer(onComplete: (() => void) | undefined): TimerHook {
   const [seconds, setSeconds] = useState<number | null>(null);
   const ref = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const durationRef = useRef<number>(90);
   const cbRef = useRef(onComplete);
   cbRef.current = onComplete;
 
   const start = useCallback((s = 90) => {
     if (ref.current) clearInterval(ref.current);
+    durationRef.current = s;
+    startTimeRef.current = Date.now();
     setSeconds(s);
     ref.current = setInterval(() => {
-      setSeconds(p => {
-        if (p === null || p <= 1) {
-          clearInterval(ref.current!);
-          cbRef.current?.();
-          return 0;
-        }
-        return p - 1;
-      });
-    }, 1000);
+      // Use wall-clock time so background/sleep doesn't desync the countdown
+      const elapsed = Math.floor((Date.now() - startTimeRef.current!) / 1000);
+      const remaining = durationRef.current - elapsed;
+      if (remaining <= 0) {
+        clearInterval(ref.current!);
+        setSeconds(0);
+        cbRef.current?.();
+      } else {
+        setSeconds(remaining);
+      }
+    }, 500); // poll at 500ms so it catches up quickly after wake
   }, []);
 
   const stop = useCallback(() => {
     if (ref.current) clearInterval(ref.current);
+    startTimeRef.current = null;
     setSeconds(null);
   }, []);
 
@@ -361,13 +368,10 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName 
   };
 
   return (
-    <div onClick={onClose} style={{
-      position: "absolute", inset: 0, background: "rgba(60,50,40,0.7)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100,
-    }}>
+    <div onClick={onClose} className="set-modal-overlay">
       <div onClick={e => e.stopPropagation()} style={{
         background: "#DDD7CC", border: "1px solid #7A7268",
-        borderRadius: "20px 20px 0 0", padding: "24px 24px 48px",
+        borderRadius: "20px 20px 0 0", padding: "24px 24px calc(24px + env(safe-area-inset-bottom))",
         width: "100%", maxWidth: "480px",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
@@ -422,12 +426,6 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName 
           </div>
         </div>
 
-        {/* Hint label */}
-        {(weightIsDefault || repsIsDefault) && (
-          <div style={{ color: "#8A7A70", fontSize: "11px", textAlign: "center", marginBottom: "16px", fontStyle: "italic" }}>
-            from last session — type to change
-          </div>
-        )}
         {(!weightIsDefault && !repsIsDefault) && <div style={{ marginBottom: "16px" }} />}
 
         <button onClick={handleSave} style={{
@@ -473,9 +471,11 @@ function WarmupSection({ items, accent }: WarmupSectionProps) {
           <span style={{ color: done ? accent : "#7A7268", fontSize: "11px", letterSpacing: "0.1em", fontWeight: 700 }}>
             WARM-UP
           </span>
-          {done && <span style={{ color: accent, fontSize: "11px", fontWeight: 700 }}>✓ DONE</span>}
         </div>
-        <span style={{ color: "#7A7268", fontSize: "14px" }}>{collapsed ? "+" : "−"}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {done && <span style={{ color: accent, fontSize: "11px", fontWeight: 700 }}>✓ DONE</span>}
+          <span style={{ color: "#7A7268", fontSize: "14px" }}>{collapsed ? "+" : "−"}</span>
+        </div>
       </button>
 
       {!collapsed && (
@@ -526,11 +526,13 @@ interface ExerciseCardProps {
   isCurrent: boolean;
   isNext: boolean;
   onLogSet: (exIdx: number, setNum: number, data: SetData) => void;
-  onStartTimer: () => void;
+  onStartTimer: (exIdx: number, setNum: number) => void;
+  onStopTimer: () => void;
 }
 
-function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isNext, onLogSet, onStartTimer }: ExerciseCardProps) {
+function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isNext, onLogSet, onStartTimer, onStopTimer }: ExerciseCardProps) {
   const [modal, setModal] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
   const completedSets = Object.keys(logs).length;
   const allDone = completedSets >= ex.sets;
 
@@ -541,12 +543,19 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
     return null;
   };
 
+  const lastSessionSummary = lastSessionLogs
+    ? Object.entries(lastSessionLogs)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([, v]) => `${v.weight}×${v.reps}`)
+        .join(", ")
+    : null;
+
   return (
     <>
       <div style={{
-        background: allDone ? "#EAF0F5" : isCurrent ? "#E8E2D8" : "#EDE8DF",
-        border: `1px solid ${allDone ? "#D8E8F0" : isCurrent ? accent + "50" : "#D8D2C8"}`,
-        borderRadius: "14px", padding: "16px",
+        background: allDone ? "#E8E6E2" : isCurrent ? "#E8E2D8" : "#EDE8DF",
+        border: `1px solid ${allDone ? "#4A7A62" : isCurrent ? accent + "50" : "#D8D2C8"}`,
+        borderRadius: "14px", padding: allDone ? "12px 16px" : "16px",
         transition: "all 0.3s",
         position: "relative", overflow: "hidden",
       }}>
@@ -561,67 +570,102 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
             background: "linear-gradient(90deg, #7A7268, transparent)" }} />
         )}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
-          <div style={{ flex: 1, paddingRight: "10px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-              <span style={{ color: allDone ? "#7EB8D4" : isCurrent ? "#1A1410" : "#5A5248", fontWeight: 700, fontSize: "14px", lineHeight: 1.3 }}>
-                {allDone ? "✓ " : ""}{ex.name}
-              </span>
-              {isNext && !allDone && (
-                <span style={{ color: "#7A7268", fontSize: "10px", letterSpacing: "0.08em", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
-              )}
-            </div>
-            {ex.note && <div style={{ color: "#6A6258", fontSize: "12px", marginTop: "3px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>}
+        {allDone ? (
+          /* ── MINIMIZED DONE STATE ── */
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#2E6B4A", fontWeight: 700, fontSize: "13px" }}>✓ {ex.name}</span>
+            <span style={{ color: "#2E6B4A", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em" }}>DONE</span>
           </div>
-          <span style={{
-            color: allDone ? "#7EB8D4" : isCurrent ? accent : "#6A6258",
-            fontSize: "11px", fontWeight: 700, fontFamily: "'Space Mono', monospace",
-            background: allDone ? "#E0F0E0" : isCurrent ? `${accent}18` : "#E8E2D8",
-            padding: "5px 9px", borderRadius: "6px", flexShrink: 0, whiteSpace: "nowrap",
-          }}>
-            {ex.sets}×{ex.reps}
-          </span>
-        </div>
-
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end" }}>
-          {Array.from({ length: ex.sets }).map((_, i) => {
-            const setNum = i + 1;
-            const log = logs[setNum];
-            const done = !!log;
-            return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
-                <button
-                  onClick={() => setModal(setNum)}
-                  style={{
-                    width: "46px", height: "46px", borderRadius: "50%",
-                    background: done ? accent : isCurrent ? "#D8D2C8" : "#E8E2D8",
-                    border: `2px solid ${done ? accent : isCurrent ? accent + "40" : "#C8C0A8"}`,
-                    color: done ? "#fff" : isCurrent ? "#666" : "#6A6258",
-                    fontSize: done ? "16px" : "13px",
-                    fontWeight: 700, cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    transition: "all 0.2s",
-                    fontFamily: "'Space Mono', monospace",
-                  }}
-                >
-                  {done ? "✓" : setNum}
-                </button>
-                {done && (log.weight || log.reps) && (
-                  <span style={{ color: "#6A6258", fontSize: "10px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
-                    {log.weight}{log.reps ? `×${log.reps}` : ""}
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+              <div style={{ flex: 1, paddingRight: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <span style={{ color: isCurrent ? "#1A1410" : "#5A5248", fontWeight: 700, fontSize: "14px", lineHeight: 1.3 }}>
+                    {ex.name}
                   </span>
+                  {isNext && (
+                    <span style={{ color: "#7A7268", fontSize: "10px", letterSpacing: "0.08em", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
+                  )}
+                  {(ex.note || lastSessionSummary) && (
+                    <button
+                      onClick={() => setShowInfo(v => !v)}
+                      style={{
+                        background: showInfo ? "#D8D2C8" : "transparent",
+                        border: `1px solid ${showInfo ? "#B8B0A8" : "#C8C0A8"}`,
+                        borderRadius: "50%", width: "18px", height: "18px",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer", flexShrink: 0, transition: "all 0.15s",
+                        color: showInfo ? "#5A5248" : "#8A7A70", fontSize: "11px", fontWeight: 700,
+                        lineHeight: 1, padding: 0,
+                      }}
+                    >i</button>
+                  )}
+                </div>
+                {showInfo && (
+                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {ex.note && (
+                      <div style={{ color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>
+                    )}
+                    {lastSessionSummary && (
+                      <div style={{ color: "#7A7268", fontSize: "11px" }}>
+                        Last week: <span style={{ fontFamily: "'Space Mono', monospace" }}>{lastSessionSummary}</span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            );
-          })}
-        </div>
+              <span style={{
+                color: isCurrent ? accent : "#6A6258",
+                fontSize: "11px", fontWeight: 700, fontFamily: "'Space Mono', monospace",
+                background: isCurrent ? `${accent}18` : "#E8E2D8",
+                padding: "5px 9px", borderRadius: "6px", flexShrink: 0, whiteSpace: "nowrap",
+              }}>
+                {ex.sets}×{ex.reps}
+              </span>
+            </div>
+
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end" }}>
+              {Array.from({ length: ex.sets }).map((_, i) => {
+                const setNum = i + 1;
+                const log = logs[setNum];
+                const done = !!log;
+                return (
+                  <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                    <button
+                      onClick={() => { onStopTimer(); setModal(setNum); }}
+                      style={{
+                        width: "46px", height: "46px", borderRadius: "50%",
+                        background: done ? accent : isCurrent ? "#D8D2C8" : "#E8E2D8",
+                        border: `2px solid ${done ? accent : isCurrent ? accent + "40" : "#C8C0A8"}`,
+                        color: done ? "#fff" : isCurrent ? "#666" : "#6A6258",
+                        fontSize: done ? "16px" : "13px",
+                        fontWeight: 700, cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "all 0.2s",
+                        fontFamily: "'Space Mono', monospace",
+                      }}
+                    >
+                      {done ? "✓" : setNum}
+                    </button>
+                    {done && (log.weight || log.reps) && (
+                      <span style={{ color: "#6A6258", fontSize: "10px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
+                        {log.weight}{log.reps ? `×${log.reps}` : ""}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {modal !== null && (
         <SetModal
           setNum={modal} totalSets={ex.sets} suggested={getSuggested(modal)}
           exerciseName={ex.name}
-          onSave={data => { onLogSet(exIdx, modal, data); setModal(null); onStartTimer(); }}
+          onSave={data => { onLogSet(exIdx, modal, data); setModal(null); onStartTimer(exIdx, modal); }}
           onClose={() => setModal(null)}
         />
       )}
@@ -1022,13 +1066,20 @@ export default function App() {
       : "All sets done — great work!");
   });
 
-  const handleStartTimer = (exIdx: number) => {
-    const nextEx = day?.exercises?.[exIdx + 1];
+  const handleStartTimer = (exIdx: number, setNum: number) => {
+    if (!day) return;
+    const ex = day.exercises[exIdx];
+    if (!ex) return;
+    // Next set of same exercise, or first set of next exercise
+    const nextSetOfSame = setNum < ex.sets ? setNum + 1 : null;
+    const nextExercise = !nextSetOfSame ? day.exercises[exIdx + 1] : null;
+    const nextLabel = nextSetOfSame
+      ? `Set ${nextSetOfSame} of ${ex.name}`
+      : nextExercise
+        ? `Set 1 of ${nextExercise.name}`
+        : null;
     timer.start(90);
-    sendNotification(
-      `Set logged · Rest 90s`,
-      nextEx ? `Up next: ${nextEx.name}` : "Last exercise — finish strong"
-    );
+    if (nextLabel) sendNotification("Rest Complete ✓", nextLabel);
   };
 
   const totalSets = day && !day.isPool ? day.exercises.reduce((a, ex) => a + ex.sets, 0) : 0;
@@ -1043,6 +1094,15 @@ export default function App() {
   const activeDateLabel = isToday ? `TODAY · ${activeDateStr}` : activeDateStr;
 
   const nextEx = day && !day.isPool ? day.exercises[activeExIdx + 1] : null;
+
+  // What to show in the rest timer banner
+  const currentEx = day && !day.isPool ? day.exercises[activeExIdx] : null;
+  const currentExCompletedSets = currentEx ? Object.keys(getExLogs(activeExIdx)).length : 0;
+  const nextSetOfCurrent = currentEx && currentExCompletedSets < currentEx.sets
+    ? `Set ${currentExCompletedSets + 1} of ${currentEx.name}`
+    : null;
+  const timerNextLabel = nextSetOfCurrent
+    ?? (nextEx ? `Set 1 of ${nextEx.name}` : null);
 
   const handleCoreToggle = (exerciseName: string) => {
     const today = todayKey();
@@ -1182,21 +1242,25 @@ export default function App() {
                   isCurrent={exIdx === activeExIdx}
                   isNext={exIdx === activeExIdx + 1}
                   onLogSet={handleLogSet}
-                  onStartTimer={() => handleStartTimer(exIdx)}
+                  onStartTimer={handleStartTimer}
+                  onStopTimer={timer.stop}
                 />
               ))}
             </div>
             {doneSets === totalSets && totalSets > 0 && (
-              <div style={{ marginTop: "20px", padding: "24px", background: "#EAF0F5", border: "1px solid #D8E8F0", borderRadius: "14px", textAlign: "center" }}>
-                <div style={{ fontSize: "32px", marginBottom: "10px" }}>💪</div>
-                <div style={{ color: "#7EB8D4", fontWeight: 700, fontSize: "14px", fontFamily: "'Space Mono', monospace", letterSpacing: "0.06em" }}>WORKOUT COMPLETE</div>
-                <div style={{ color: "#C8DCE8", fontSize: "12px", marginTop: "5px" }}>{totalSets} sets logged · Hit your protein</div>
-                <button onClick={() => setShowExport(true)} style={{
-                  marginTop: "14px", background: "none", border: "1px solid #D8E8F0",
-                  borderRadius: "8px", color: "#2a4a5a", fontSize: "11px",
-                  padding: "8px 16px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                  fontWeight: 700, letterSpacing: "0.08em",
-                }}>EXPORT FOR CLAUDE ANALYSIS →</button>
+              <div style={{ marginTop: "20px", padding: "20px 16px", background: "#E8E6E2", border: "1px solid #4A7A62", borderRadius: "14px", textAlign: "center" }}>
+                <div style={{ fontSize: "28px", marginBottom: "8px" }}>💪</div>
+                <div style={{ color: "#2E6B4A", fontWeight: 700, fontSize: "13px", fontFamily: "'Space Mono', monospace", letterSpacing: "0.06em" }}>WORKOUT COMPLETE</div>
+                <div style={{ color: "#4A6A58", fontSize: "12px", marginTop: "4px" }}>{totalSets} sets logged · Hit your protein</div>
+                {/* Export prompt only on Friday (program day 3 = Lower+Core) */}
+                {programDayIdx === 3 && (
+                  <button onClick={() => setShowExport(true)} style={{
+                    marginTop: "12px", background: "none", border: "1px solid #4A7A62",
+                    borderRadius: "8px", color: "#2E6B4A", fontSize: "11px",
+                    padding: "8px 16px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    fontWeight: 700, letterSpacing: "0.08em",
+                  }}>EXPORT WEEK FOR CLAUDE →</button>
+                )}
               </div>
             )}
             {day.pm && (
@@ -1215,35 +1279,48 @@ export default function App() {
 
         </div>{/* end scrollable content */}
 
-        {/* ── TIMER BANNER — pinned to bottom of phone shell ── */}
-        {timer.active && (
+      </div>{/* end flex column / app-inner */}
+
+      {/* ── TIMER OVERLAY — direct child of app-shell (position:relative) ── */}
+      {timer.active && (
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "rgba(42,36,32,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 150,
+        }}>
           <div style={{
-            flexShrink: 0,
-            background: (timer.seconds ?? 0) <= 10 ? "#F0E8E0" : "#E8E2D8",
-            borderTop: `2px solid ${(timer.seconds ?? 0) <= 10 ? "#B85C38" : "#4A7FA5"}`,
-            padding: "16px 24px 24px",
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-            transition: "background 0.5s",
+            background: (timer.seconds ?? 0) <= 10 ? "#F0E8E0" : "#F5F0E8",
+            border: `2px solid ${(timer.seconds ?? 0) <= 10 ? "#B85C38" : "#4A7FA5"}`,
+            borderRadius: "24px", padding: "36px 40px",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: "12px",
+            minWidth: "260px", transition: "border-color 0.4s, background 0.4s",
           }}>
-            <div>
-              <div style={{ color: "#6A6258", fontSize: "10px", fontWeight: 700, letterSpacing: "0.12em", marginBottom: "2px" }}>RESTING</div>
-              {nextEx && <div style={{ color: "#7A7268", fontSize: "12px" }}>Next: {nextEx.name}</div>}
-            </div>
-            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: "32px", fontWeight: 700, color: (timer.seconds ?? 0) <= 10 ? "#B85C38" : "#7EB8D4" }}>
+            <div style={{ color: "#7A7268", fontSize: "11px", fontWeight: 700, letterSpacing: "0.14em" }}>RESTING</div>
+            <span style={{
+              fontFamily: "'Space Mono', monospace", fontSize: "64px", fontWeight: 700, lineHeight: 1,
+              color: (timer.seconds ?? 0) <= 10 ? "#B85C38" : "#4A7FA5",
+              transition: "color 0.4s",
+            }}>
               {String(Math.floor((timer.seconds ?? 0) / 60)).padStart(2, "0")}:{String((timer.seconds ?? 0) % 60).padStart(2, "0")}
             </span>
+            {timerNextLabel && (
+              <div style={{ color: "#7A7268", fontSize: "12px", textAlign: "center" }}>
+                Next: <span style={{ color: "#2A2420", fontWeight: 600 }}>{timerNextLabel}</span>
+              </div>
+            )}
             <button onClick={timer.stop} style={{
-              background: "#DDD7CC", border: "1px solid #7A7268", borderRadius: "8px",
-              color: "#6A6258", fontSize: "12px", fontWeight: 700,
-              padding: "10px 18px", cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.06em",
+              marginTop: "8px", background: "transparent",
+              border: "1px solid #C8C0A8", borderRadius: "10px",
+              color: "#7A7268", fontSize: "12px", fontWeight: 700,
+              padding: "10px 32px", cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.08em",
             }}>SKIP</button>
           </div>
-        )}
+        </div>
+      )}
 
-      </div>{/* end flex column */}
-
-      {/* ── MODALS (absolute, clipped to phone shell) ── */}
+      {/* ── MODALS ── */}
       {showExport && <ExportModal allLogs={allLogs} coreLogs={coreLogs} onClose={() => setShowExport(false)} />}
       </div>
     </div>
