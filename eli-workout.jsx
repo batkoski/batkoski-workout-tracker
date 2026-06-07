@@ -16,7 +16,7 @@ const WEEK = [
   { short: "SAT", dayIndex: 6 },
 ];
 
-const DAY_MAP = { 0: null, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: null };
+const DAY_MAP = { 0: null, 1: 0, 2: 2, 3: 1, 4: 3, 5: 4, 6: null };
 
 const PROGRAM_DAYS = [
   {
@@ -107,6 +107,7 @@ const PROGRAM_DAYS = [
       { name: "Rear Delt Fly",             sets: 3, reps: "15",      note: "Machine or cable — light weight, focus on squeeze" },
       { name: "EZ Bar Curl",               sets: 3, reps: "10",      note: "Easier on wrists than straight bar" },
       { name: "Hammer Curls",              sets: 2, reps: "12",      note: "Brachialis + forearm strength" },
+      { name: "Shoulder Shrugs",           sets: 3, reps: "12",      note: "Trap builder — hold at the top, don't roll the shoulders" },
     ],
     pm: [
       { name: "Child's Pose with Lat Reach", duration: "60s each side", cue: "Walk hands far to each side — feel the lat lengthen. Priority after rack pulls." },
@@ -122,12 +123,11 @@ const PROGRAM_DAYS = [
     color: "#B85C38", isPool: false,
     warmup: ["Hip rocks x10","Ankle mobility x10","BW squats x10","90/90 hip switches x8"],
     exercises: [
-      { name: "Goblet Squat",              sets: 4, reps: "6-8",    note: "Front squat on hold — wrist/t-spine mobility not there yet. Goblet trains the same pattern, no compromise." },
-      { name: "Romanian Deadlift",         sets: 3, reps: "10",     note: "Hinge with control — neutral spine always. Warm hamstrings first." },
+      { name: "Leg Press",                  sets: 4, reps: "8-10",   note: "Control the descent, full range — don't lock out hard at the top" },
+      { name: "Single-Leg RDL",            sets: 3, reps: "10/leg", note: "Hinge with control — neutral spine, feel the hamstring stretch" },
       { name: "Bulgarian Split Squat",     sets: 3, reps: "8/leg",  note: "More stable than lunges, better glute loading" },
       { name: "Leg Curl (machine)",        sets: 3, reps: "12",     note: "Hamstring balance — important post-back surgery" },
-      { name: "Cable Pull-Through",        sets: 3, reps: "15",     note: "Glute/hip hinge with zero spinal compression" },
-      { name: "Dead Bug",                  sets: 3, reps: "8/side", note: "Core finisher — breathe out at full extension" },
+      { name: "Calf Raises",               sets: 4, reps: "15-20",  note: "Full stretch at the bottom, pause at the top" },
     ],
     pm: [
       { name: "Standing Hamstring Stretch", duration: "60s each side", cue: "Foot on low surface, hinge at hip — don't round your back. Essential given your cramping history." },
@@ -844,7 +844,17 @@ export default function App() {
 
   // Build day storage key: "YYYY-MM-DD|programIdx"  (only today writes; other days read-only)
   const isToday = activeDow === todayDow;
-  const dayStorageKey = `${todayKey()}|${programDayIdx}`;
+
+  // Compute the actual calendar date for the selected day-of-week within this week
+  const activeDayDate = (() => {
+    const today = new Date();
+    const diff = activeDow - today.getDay();
+    const d = new Date(today);
+    d.setDate(today.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const dayStorageKey = `${activeDayDate}|${programDayIdx}`;
 
   const getDayLogs = () => allLogs[dayStorageKey] || {};
 
