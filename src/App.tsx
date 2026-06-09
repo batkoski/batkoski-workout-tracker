@@ -74,6 +74,7 @@ interface RestTip {
 
 const STORAGE_KEY = "eli_workout_logs_v1";
 const CORE_LOG_KEY = "eli_core_logs_v1";
+const WARMUP_LOG_KEY = "eli_warmup_logs_v1";
 const NOTIF_PERM_KEY = "eli_notif_permission";
 
 void NOTIF_PERM_KEY; // referenced for completeness, used via localStorage key
@@ -89,7 +90,7 @@ const WEEK: WeekDay[] = [
 ];
 
 const DAY_MAP: { [dow: number]: number | null } = {
-  0: null, 1: 0, 2: 1, 3: 2, 4: 4, 5: 3, 6: null,
+  0: null, 1: 0, 2: 2, 3: 1, 4: 3, 5: 4, 6: null,
 };
 
 const PROGRAM_DAYS: ProgramDay[] = [
@@ -181,6 +182,7 @@ const PROGRAM_DAYS: ProgramDay[] = [
       { name: "Rear Delt Fly",             sets: 3, reps: "15",      note: "Machine or cable — light weight, focus on squeeze" },
       { name: "EZ Bar Curl",               sets: 3, reps: "10",      note: "Easier on wrists than straight bar" },
       { name: "Hammer Curls",              sets: 2, reps: "12",      note: "Brachialis + forearm strength" },
+      { name: "Shoulder Shrugs",           sets: 3, reps: "12",      note: "Trap builder — hold at the top, don't roll the shoulders" },
     ],
     pm: [
       { name: "Child's Pose with Lat Reach", duration: "60s each side", cue: "Walk hands far to each side — feel the lat lengthen. Priority after rack pulls." },
@@ -196,12 +198,11 @@ const PROGRAM_DAYS: ProgramDay[] = [
     color: "#B85C38", isPool: false,
     warmup: ["Hip rocks x10","Ankle mobility x10","BW squats x10","90/90 hip switches x8"],
     exercises: [
-      { name: "Goblet Squat",              sets: 4, reps: "6-8",    note: "Front squat on hold — wrist/t-spine mobility not there yet. Goblet trains the same pattern, no compromise." },
-      { name: "Romanian Deadlift",         sets: 3, reps: "10",     note: "Hinge with control — neutral spine always. Warm hamstrings first." },
+      { name: "Leg Press",                  sets: 4, reps: "8-10",   note: "Control the descent, full range — don't lock out hard at the top" },
+      { name: "Single-Leg RDL",            sets: 3, reps: "10/leg", note: "Hinge with control — neutral spine, feel the hamstring stretch" },
       { name: "Bulgarian Split Squat",     sets: 3, reps: "8/leg",  note: "More stable than lunges, better glute loading" },
       { name: "Leg Curl (machine)",        sets: 3, reps: "12",     note: "Hamstring balance — important post-back surgery" },
-      { name: "Cable Pull-Through",        sets: 3, reps: "15",     note: "Glute/hip hinge with zero spinal compression" },
-      { name: "Dead Bug",                  sets: 3, reps: "8/side", note: "Core finisher — breathe out at full extension" },
+      { name: "Calf Raises",               sets: 4, reps: "15-20",  note: "Full stretch at the bottom, pause at the top" },
     ],
     pm: [
       { name: "Standing Hamstring Stretch", duration: "60s each side", cue: "Foot on low surface, hinge at hip — don't round your back. Essential given your cramping history." },
@@ -280,6 +281,16 @@ const POOL_COLORS: { [category: string]: string } = {
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Returns the ISO date string of the most recent Monday (or today if Monday).
+// Used as the week key so logs persist through the whole Mon–Sun week.
+function weekKey(): string {
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun, 1=Mon...
+  const diff = day === 0 ? -6 : 1 - day; // days back to Monday
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
 }
 
 function sendNotification(title: string, body: string): void {
@@ -446,14 +457,15 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName 
 interface WarmupSectionProps {
   items: string[];
   accent: string;
+  done: boolean;
+  onDone: () => void;
 }
 
-function WarmupSection({ items, accent }: WarmupSectionProps) {
-  const [done, setDone] = useState(false);
+function WarmupSection({ items, accent, done, onDone }: WarmupSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const handleCheck = () => {
-    setDone(true);
+    onDone();
     setTimeout(() => setCollapsed(true), 400);
   };
 
@@ -468,20 +480,20 @@ function WarmupSection({ items, accent }: WarmupSectionProps) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ color: done ? accent : "#7A7268", fontSize: "11px", letterSpacing: "0.1em", fontWeight: 700 }}>
+          <span style={{ color: done ? "#2E6B4A" : "#7A7268", fontSize: "11px", letterSpacing: "0.1em", fontWeight: 700 }}>
             WARM-UP
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {done && <span style={{ color: accent, fontSize: "11px", fontWeight: 700 }}>✓ DONE</span>}
+          {done && <span style={{ color: "#2E6B4A", fontSize: "11px", fontWeight: 700 }}>✓ DONE</span>}
           <span style={{ color: "#7A7268", fontSize: "14px" }}>{collapsed ? "+" : "−"}</span>
         </div>
       </button>
 
       {!collapsed && (
         <div style={{
-          background: done ? `${accent}08` : "#E8E2D8",
-          border: `1px solid ${done ? accent + "30" : "#D8D2C8"}`,
+          background: done ? "#E8E6E2" : "#E8E2D8",
+          border: `1px solid ${done ? "#4A7A62" : "#D8D2C8"}`,
           borderRadius: "10px", padding: "12px 14px",
           display: "flex", alignItems: "center", justifyContent: "space-between",
           gap: "12px", transition: "all 0.3s",
@@ -491,12 +503,12 @@ function WarmupSection({ items, accent }: WarmupSectionProps) {
               <div key={w} style={{
                 display: "flex", alignItems: "center", gap: "8px",
                 padding: "6px 0",
-                borderTop: i > 0 ? `1px solid ${done ? "#D8D0C0" : "#D8D2C8"}` : "none",
+                borderTop: i > 0 ? `1px solid ${done ? "#C8C4BC" : "#D8D2C8"}` : "none",
               }}>
                 <span style={{
                   width: "5px", height: "5px", borderRadius: "50%", flexShrink: 0,
-                  background: done ? "#8A7A70" : accent,
-                  opacity: done ? 0.4 : 0.6,
+                  background: done ? "#4A7A62" : accent,
+                  opacity: done ? 0.5 : 0.6,
                 }} />
                 <span style={{
                   color: done ? "#8A7A70" : "#5A5248", fontSize: "12px",
@@ -512,8 +524,8 @@ function WarmupSection({ items, accent }: WarmupSectionProps) {
             onClick={e => { e.stopPropagation(); if (!done) handleCheck(); }}
             style={{
               width: "36px", height: "36px", borderRadius: "50%", flexShrink: 0,
-              background: done ? accent : "transparent",
-              border: `2px solid ${done ? accent : "#7A7268"}`,
+              background: done ? "#2E6B4A" : "transparent",
+              border: `2px solid ${done ? "#2E6B4A" : "#7A7268"}`,
               display: "flex", alignItems: "center", justifyContent: "center",
               cursor: done ? "default" : "pointer", transition: "all 0.25s",
             }}
@@ -882,7 +894,7 @@ function PoolDay({ day, todayChecked, onToggle, freq }: PoolDayProps) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "14px" }}>
         <p style={{ color: "#5A5248", fontSize: "13px", margin: 0, lineHeight: 1.6 }}>
-          Pick 2–3 per category, finish with cardio. Tap ✓ when done.
+          Pick 2–3 per category, finish with cardio.
         </p>
         {checkedCount > 0 && (
           <span style={{ color: "#4A7FA5", fontSize: "11px", fontFamily: "'Space Mono', monospace", flexShrink: 0, marginLeft: "8px" }}>
@@ -1088,6 +1100,7 @@ export default function App() {
   const [activeDow, setActiveDow] = useState<number>(todayDow);
   const [allLogs, setAllLogs] = useState<AllLogs>({});
   const [coreLogs, setCoreLogs] = useState<CoreLogs>({});
+  const [warmupLogs, setWarmupLogs] = useState<{ [dayKey: string]: boolean }>({});
   const [showExport, setShowExport] = useState(false);
   const [activeExIdx, setActiveExIdx] = useState(0);
 
@@ -1098,6 +1111,8 @@ export default function App() {
       if (stored) setAllLogs(JSON.parse(stored) as AllLogs);
       const coreStored = localStorage.getItem(CORE_LOG_KEY);
       if (coreStored) setCoreLogs(JSON.parse(coreStored) as CoreLogs);
+      const warmupStored = localStorage.getItem(WARMUP_LOG_KEY);
+      if (warmupStored) setWarmupLogs(JSON.parse(warmupStored) as { [dayKey: string]: boolean });
     } catch (_) {}
   }, []);
 
@@ -1110,20 +1125,24 @@ export default function App() {
     try { localStorage.setItem(CORE_LOG_KEY, JSON.stringify(coreLogs)); } catch (_) {}
   }, [coreLogs]);
 
+  useEffect(() => {
+    try { localStorage.setItem(WARMUP_LOG_KEY, JSON.stringify(warmupLogs)); } catch (_) {}
+  }, [warmupLogs]);
+
   const programDayIdx = DAY_MAP[activeDow] ?? null;
   const day = programDayIdx !== null ? PROGRAM_DAYS[programDayIdx] : null;
   const isRestDay = day === null;
   const accent = day?.color || "#6A6258";
 
   const isToday = activeDow === todayDow;
-  const dayStorageKey = `${todayKey()}|${programDayIdx}`;
+  const dayStorageKey = `${weekKey()}|${programDayIdx}`;
 
   const getDayLogs = (): DayLogs => allLogs[dayStorageKey] || {};
 
   const getLastSessionExLogs = (exIdx: number): { [setNum: number]: SetData } | null => {
-    const todayStr = todayKey();
+    const currentWeek = weekKey();
     const matchingKeys = Object.keys(allLogs)
-      .filter(k => k.endsWith(`|${programDayIdx}`) && !k.startsWith(todayStr))
+      .filter(k => k.endsWith(`|${programDayIdx}`) && !k.startsWith(currentWeek))
       .sort()
       .reverse();
     for (const key of matchingKeys) {
@@ -1274,20 +1293,31 @@ export default function App() {
           const isTodayDot = w.dayIndex === todayDow;
           const pIdx = DAY_MAP[w.dayIndex];
           const dayAccent = pIdx !== null && pIdx !== undefined ? PROGRAM_DAYS[pIdx]?.color ?? "#6A6258" : "#6A6258";
+
+          // Check if a workout was completed this week for this day
+          const currentWeekKey = weekKey();
+          const wasCompleted = pIdx !== null && pIdx !== undefined &&
+            Object.keys(allLogs).some(k => k.startsWith(currentWeekKey) && k.endsWith(`|${pIdx}`) && Object.keys(allLogs[k]).length > 0);
+
+          const effectiveColor = wasCompleted ? "#2E6B4A" : dayAccent;
+          const effectiveBg = wasCompleted ? "#E8E6E2" : isActive ? `${dayAccent}15` : "#EDE8DF";
+          const effectiveBorder = wasCompleted ? "#4A7A62" : isActive ? dayAccent + "70" : "#D0CAC0";
+
           return (
             <button key={w.dayIndex} onClick={() => { setActiveDow(w.dayIndex); setActiveExIdx(0); }} style={{
               flexShrink: 0, padding: "9px 10px",
-              background: isActive ? `${dayAccent}15` : "#EDE8DF",
-              border: `1px solid ${isActive ? dayAccent + "70" : "#D0CAC0"}`,
+              background: effectiveBg,
+              border: `1px solid ${effectiveBorder}`,
               borderRadius: "10px", cursor: "pointer",
-              color: isActive ? dayAccent : "#7A7268",
+              color: wasCompleted ? "#2E6B4A" : isActive ? dayAccent : "#7A7268",
               fontSize: "11px", fontWeight: 700,
               fontFamily: "'DM Sans', sans-serif",
               textAlign: "center", minWidth: "42px", letterSpacing: "0.04em",
             }}>
               <div>{w.short}</div>
               <div style={{ marginTop: "5px", height: "4px", display: "flex", justifyContent: "center" }}>
-                {isTodayDot && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: isActive ? dayAccent : "#7A7268" }} />}
+                {isTodayDot && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: isActive ? effectiveColor : "#7A7268" }} />}
+                {wasCompleted && !isTodayDot && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#2E6B4A" }} />}
               </div>
             </button>
           );
@@ -1333,7 +1363,12 @@ export default function App() {
         ) : (
           <>
             {day.warmup.length > 0 && (
-              <WarmupSection items={day.warmup} accent={accent} />
+              <WarmupSection
+                items={day.warmup}
+                accent={accent}
+                done={!!warmupLogs[dayStorageKey]}
+                onDone={() => setWarmupLogs(prev => ({ ...prev, [dayStorageKey]: true }))}
+              />
             )}
             <WorkoutSection
               exercises={day.exercises}
