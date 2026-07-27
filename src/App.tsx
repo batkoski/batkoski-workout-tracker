@@ -56,6 +56,11 @@ interface CoreLogs {
   [date: string]: { [exerciseName: string]: boolean };
 }
 
+// { "YYYY-MM-DD|programIdx": { "ex-N": string, "workout": string } }
+interface NotesLogs {
+  [dayKey: string]: { [noteKey: string]: string };
+}
+
 interface FreqMap {
   [exerciseName: string]: number;
 }
@@ -75,6 +80,7 @@ interface RestTip {
 const STORAGE_KEY = "eli_workout_logs_v1";
 const CORE_LOG_KEY = "eli_core_logs_v1";
 const WARMUP_LOG_KEY = "eli_warmup_logs_v1";
+const NOTES_LOG_KEY = "eli_notes_logs_v1";
 const NOTIF_PERM_KEY = "eli_notif_permission";
 
 void NOTIF_PERM_KEY; // referenced for completeness, used via localStorage key
@@ -99,12 +105,12 @@ const PROGRAM_DAYS: ProgramDay[] = [
     color: "#B85C38", isPool: false,
     warmup: ["Band pull-aparts x15","Shoulder CARs x5/side","Scap push-ups x10","Light DB press x12"],
     exercises: [
-      { name: "Incline Barbell Press",      sets: 4, reps: "6-8",    note: "Primary mover — push load relative to how you feel" },
-      { name: "Seated DB Shoulder Press",   sets: 3, reps: "8-10",   note: "Controlled descent, full range" },
-      { name: "Cable Chest Fly",            sets: 3, reps: "12",     note: "Mid/high anchors — pause at the squeeze" },
-      { name: "Lateral Raises",             sets: 4, reps: "12-15",  note: "Slow eccentric, 3 sec down" },
-      { name: "Overhead Triceps Extension", sets: 3, reps: "12",     note: "Cable or DB — long-head stretch at bottom" },
-      { name: "Face Pulls",                 sets: 2, reps: "15",     note: "Shoulder health — don't skip" },
+      { name: "Incline Barbell Press",           sets: 4, reps: "6-8",    note: "Primary mover — push load relative to how you feel" },
+      { name: "Seated DB Shoulder Press",        sets: 3, reps: "8-10",   note: "Controlled descent, full range" },
+      { name: "Cable Chest Fly",                 sets: 3, reps: "12",     note: "Mid/high anchors — pause at the squeeze" },
+      { name: "Single-Arm Cable Lateral Raise",  sets: 4, reps: "12-15",  note: "Slow eccentric, 3 sec down — cable keeps tension throughout" },
+      { name: "Skull Crushers",                  sets: 3, reps: "10-12",  note: "EZ bar or dumbbells — lower to forehead, full extension at top" },
+      { name: "Face Pulls",                      sets: 2, reps: "15",     note: "Shoulder health — don't skip" },
     ],
     pm: [
       { name: "Doorway Chest Stretch", duration: "60s each side", cue: "Arm at 90°, lean into doorframe — don't arch your lower back" },
@@ -551,9 +557,11 @@ interface WorkoutSectionProps {
   onLogSet: (exIdx: number, setNum: number, data: SetData) => void;
   onStartTimer: (exIdx: number, setNum: number) => void;
   onStopTimer: () => void;
+  getExNote: (exIdx: number) => string;
+  onExNoteChange: (exIdx: number, note: string) => void;
 }
 
-function WorkoutSection({ exercises, accent, doneSets, totalSets, activeExIdx, getExLogs, getLastSessionExLogs, onLogSet, onStartTimer, onStopTimer }: WorkoutSectionProps) {
+function WorkoutSection({ exercises, accent, doneSets, totalSets, activeExIdx, getExLogs, getLastSessionExLogs, onLogSet, onStartTimer, onStopTimer, getExNote, onExNoteChange }: WorkoutSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const allDone = doneSets === totalSets && totalSets > 0;
 
@@ -591,6 +599,8 @@ function WorkoutSection({ exercises, accent, doneSets, totalSets, activeExIdx, g
               onLogSet={onLogSet}
               onStartTimer={onStartTimer}
               onStopTimer={onStopTimer}
+              exNote={getExNote(exIdx)}
+              onExNoteChange={(note) => onExNoteChange(exIdx, note)}
             />
           ))}
         </div>
@@ -612,9 +622,11 @@ interface ExerciseCardProps {
   onLogSet: (exIdx: number, setNum: number, data: SetData) => void;
   onStartTimer: (exIdx: number, setNum: number) => void;
   onStopTimer: () => void;
+  exNote: string;
+  onExNoteChange: (note: string) => void;
 }
 
-function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isNext, onLogSet, onStartTimer, onStopTimer }: ExerciseCardProps) {
+function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isNext, onLogSet, onStartTimer, onStopTimer, exNote, onExNoteChange }: ExerciseCardProps) {
   const [modal, setModal] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [doneCollapsed, setDoneCollapsed] = useState(true);
@@ -771,6 +783,28 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                   </div>
                 );
               })}
+            </div>
+
+            {/* Per-exercise notes */}
+            <div style={{ marginTop: "12px" }}>
+              <textarea
+                value={exNote}
+                onChange={e => onExNoteChange(e.target.value)}
+                placeholder="Notes for this exercise..."
+                rows={1}
+                style={{
+                  width: "100%", background: exNote ? "#E0DBD0" : "transparent",
+                  border: `1px solid ${exNote ? "#B8B0A8" : "#D0CAC0"}`,
+                  borderRadius: "8px", padding: "8px 10px",
+                  color: "#3A3028", fontSize: "12px", fontFamily: "'DM Sans', sans-serif",
+                  resize: "none", outline: "none", boxSizing: "border-box",
+                  lineHeight: 1.5, transition: "border-color 0.2s, background 0.2s",
+                  overflow: "hidden",
+                }}
+                onFocus={e => { e.target.style.borderColor = accent; e.target.style.background = "#E0DBD0"; }}
+                onBlur={e => { e.target.style.borderColor = exNote ? "#B8B0A8" : "#D0CAC0"; if (!exNote) e.target.style.background = "transparent"; }}
+                onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+              />
             </div>
           </>
         )}
@@ -1010,10 +1044,11 @@ function RestDayView() {
 interface ExportModalProps {
   allLogs: AllLogs;
   coreLogs: CoreLogs;
+  notesLogs: NotesLogs;
   onClose: () => void;
 }
 
-function ExportModal({ allLogs, coreLogs, onClose }: ExportModalProps) {
+function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps) {
   const [copied, setCopied] = useState(false);
 
   const formatted = Object.entries(allLogs)
@@ -1030,8 +1065,13 @@ function ExportModal({ allLogs, coreLogs, onClose }: ExportModalProps) {
           .sort(([a], [b]) => parseInt(a.split("-")[1]!) - parseInt(b.split("-")[1]!))
           .map(([, v]) => `${v.weight || "?"}lbs × ${v.reps || "?"}`)
           .join(", ");
-        if (sets) lines.push(`  ${ex.name}: ${sets}`);
+        if (sets) {
+          const note = notesLogs[dateKey]?.[`ex-${exIdx}`];
+          lines.push(`  ${ex.name}: ${sets}${note ? ` — "${note}"` : ""}`);
+        }
       });
+      const workoutNote = notesLogs[dateKey]?.["workout"];
+      if (workoutNote) lines.push(`  📝 ${workoutNote}`);
       return lines.join("\n");
     })
     .filter(Boolean)
@@ -1101,6 +1141,7 @@ export default function App() {
   const [allLogs, setAllLogs] = useState<AllLogs>({});
   const [coreLogs, setCoreLogs] = useState<CoreLogs>({});
   const [warmupLogs, setWarmupLogs] = useState<{ [dayKey: string]: boolean }>({});
+  const [notesLogs, setNotesLogs] = useState<NotesLogs>({});
   const [showExport, setShowExport] = useState(false);
   const [activeExIdx, setActiveExIdx] = useState(0);
 
@@ -1113,6 +1154,8 @@ export default function App() {
       if (coreStored) setCoreLogs(JSON.parse(coreStored) as CoreLogs);
       const warmupStored = localStorage.getItem(WARMUP_LOG_KEY);
       if (warmupStored) setWarmupLogs(JSON.parse(warmupStored) as { [dayKey: string]: boolean });
+      const notesStored = localStorage.getItem(NOTES_LOG_KEY);
+      if (notesStored) setNotesLogs(JSON.parse(notesStored) as NotesLogs);
     } catch (_) {}
   }, []);
 
@@ -1128,6 +1171,10 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem(WARMUP_LOG_KEY, JSON.stringify(warmupLogs)); } catch (_) {}
   }, [warmupLogs]);
+
+  useEffect(() => {
+    try { localStorage.setItem(NOTES_LOG_KEY, JSON.stringify(notesLogs)); } catch (_) {}
+  }, [notesLogs]);
 
   const programDayIdx = DAY_MAP[activeDow] ?? null;
   const day = programDayIdx !== null ? PROGRAM_DAYS[programDayIdx] : null;
@@ -1163,6 +1210,25 @@ export default function App() {
       if (k.startsWith(`${exIdx}-`)) result[parseInt(k.split("-")[1]!)] = v;
     });
     return result;
+  };
+
+  const getExNote = (exIdx: number): string =>
+    notesLogs[dayStorageKey]?.[`ex-${exIdx}`] ?? "";
+
+  const handleExNoteChange = (exIdx: number, note: string) => {
+    setNotesLogs(prev => ({
+      ...prev,
+      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), [`ex-${exIdx}`]: note },
+    }));
+  };
+
+  const workoutNote = notesLogs[dayStorageKey]?.["workout"] ?? "";
+
+  const handleWorkoutNoteChange = (note: string) => {
+    setNotesLogs(prev => ({
+      ...prev,
+      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), workout: note },
+    }));
   };
 
   const handleLogSet = (exIdx: number, setNum: number, data: SetData) => {
@@ -1381,6 +1447,8 @@ export default function App() {
               onLogSet={handleLogSet}
               onStartTimer={handleStartTimer}
               onStopTimer={timer.stop}
+              getExNote={getExNote}
+              onExNoteChange={handleExNoteChange}
             />
             {doneSets === totalSets && totalSets > 0 && (
               <div style={{ marginTop: "20px", padding: "20px 16px", background: "#E8E6E2", border: "1px solid #4A7A62", borderRadius: "14px", textAlign: "center" }}>
@@ -1398,6 +1466,28 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* ── WORKOUT NOTES ── */}
+            <div style={{ marginTop: "16px", marginBottom: "4px" }}>
+              <div style={{ color: "#7A7268", fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", marginBottom: "8px" }}>WORKOUT NOTES</div>
+              <textarea
+                value={workoutNote}
+                onChange={e => handleWorkoutNoteChange(e.target.value)}
+                placeholder="How did the session feel? Any PRs, issues, or things to remember..."
+                rows={3}
+                style={{
+                  width: "100%", background: workoutNote ? "#E0DBD0" : "#EDE8DF",
+                  border: `1px solid ${workoutNote ? "#B8B0A8" : "#D0CAC0"}`,
+                  borderRadius: "10px", padding: "12px 14px",
+                  color: "#3A3028", fontSize: "13px", fontFamily: "'DM Sans', sans-serif",
+                  resize: "none", outline: "none", boxSizing: "border-box",
+                  lineHeight: 1.6, transition: "border-color 0.2s, background 0.2s",
+                }}
+                onFocus={e => { e.target.style.borderColor = accent; e.target.style.background = "#E0DBD0"; }}
+                onBlur={e => { e.target.style.borderColor = workoutNote ? "#B8B0A8" : "#D0CAC0"; if (!workoutNote) e.target.style.background = "#EDE8DF"; }}
+                onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+              />
+            </div>
             {day.pm && (
               <PMSection
                 stretches={day.pm}
@@ -1456,7 +1546,7 @@ export default function App() {
       )}
 
       {/* ── MODALS ── */}
-      {showExport && <ExportModal allLogs={allLogs} coreLogs={coreLogs} onClose={() => setShowExport(false)} />}
+      {showExport && <ExportModal allLogs={allLogs} coreLogs={coreLogs} notesLogs={notesLogs} onClose={() => setShowExport(false)} />}
       </div>
     </div>
   );
