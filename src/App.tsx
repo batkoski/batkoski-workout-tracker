@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { ReactNode } from "react";
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,31 @@ interface Exercise {
   sets: number;
   reps: string;
   note: string;
+  // Unilateral exercises track the weaker side first.
+  unilateral?: boolean;
+}
+
+// A skill exercise (pistol progression) tracked left/right separately.
+// Box Pistol additionally tracks box height (the primary progression variable)
+// and an optional counterbalance weight.
+interface SkillExercise {
+  name: string;
+  sets: number;
+  reps: string;          // target, e.g. "10/side" or "6/side"
+  note: string;
+  hasBox?: boolean;      // show box-height field
+  hasCounterbalance?: boolean; // show counterbalance-weight field
+}
+
+// A tracked "PR-style" exercise on the progression block: log a single value
+// per set (either a hold duration or reps), left/right when unilateral.
+interface TrackedExercise {
+  name: string;
+  sets: number;
+  target: string;        // display target, e.g. "R 50s / L 45s"
+  note: string;
+  unilateral?: boolean;  // log L and R separately
+  metric: "time" | "reps" | "weight"; // logged value type; "weight" = weight × reps
 }
 
 interface PoolExercise {
@@ -24,21 +50,43 @@ interface PoolCategories {
   [category: string]: PoolExercise[];
 }
 
+type DayKind = "foundational" | "progression" | "mobility";
+
 interface ProgramDay {
   id: number;
   title: string;
   subtitle: string;
   color: string;
-  isPool: boolean;
+  kind: DayKind;
   warmup: string[];
   exercises: Exercise[];
   pm: WarmupItem[];
   pool?: PoolCategories;
+  // Progression-block days:
+  skill?: SkillExercise[];
+  tracked?: TrackedExercise[];
+  progressionNote?: string;
+  // Mobility days:
+  coreCalf?: Exercise[];
+  optionalSkill?: SkillExercise[];
 }
 
+// A logged set. weight/reps are used for standard (bilateral) exercises.
+// The optional *L/*R fields are used for unilateral & skill exercises, and
+// box/counterbalance for box-pistol work. All optional so historical records
+// that only have {weight, reps} still parse.
 interface SetData {
   weight: string;
   reps: string;
+  weightL?: string;
+  repsL?: string;
+  weightR?: string;
+  repsR?: string;
+  boxHeight?: string;      // inches
+  counterbalance?: string; // lb
+  valueL?: string;         // tracked-exercise value (time/reps), left side
+  valueR?: string;         // tracked-exercise value, right side
+  value?: string;          // tracked-exercise value, bilateral
 }
 
 // { "exIdx-setNum": SetData }
@@ -77,11 +125,35 @@ interface RestTip {
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "eli_workout_logs_v1";
-const CORE_LOG_KEY = "eli_core_logs_v1";
-const WARMUP_LOG_KEY = "eli_warmup_logs_v1";
-const NOTES_LOG_KEY = "eli_notes_logs_v1";
+// v2: the 2026-09-30 program rebuild changed the day mapping (Tue moved from Pull
+// to the Progression Block) AND changed the exercise list on every day. Logs are
+// keyed positionally ("YYYY-MM-DD|programIdx" → "exIdx-setNum"), so reusing the v1
+// namespace would silently remap every historical record onto a different exercise.
+// To protect history we write the new program to fresh v2 keys and leave v1 data
+// untouched. The v1 logs are still surfaced (read-only) in the export, labeled with
+// a frozen snapshot of the v1 program so old numbers stay attached to the exercise
+// they were actually recorded for.
+const STORAGE_KEY = "eli_workout_logs_v2";
+const CORE_LOG_KEY = "eli_core_logs_v2";
+const WARMUP_LOG_KEY = "eli_warmup_logs_v2";
+const NOTES_LOG_KEY = "eli_notes_logs_v2";
 const NOTIF_PERM_KEY = "eli_notif_permission";
+
+// Legacy (pre-2026-09-30) storage keys — read only, for exporting past history.
+const LEGACY_STORAGE_KEY = "eli_workout_logs_v1";
+const LEGACY_NOTES_LOG_KEY = "eli_notes_logs_v1";
+
+// Frozen snapshot of the v1 program's day titles + exercise names, in the exact
+// index order they were stored under. Used ONLY to label historical v1 logs on
+// export so weights render against the correct exercise. Do not edit — this must
+// match the program as it existed when the v1 logs were written.
+const LEGACY_PROGRAM: { title: string; exercises: string[] }[] = [
+  { title: "PUSH DAY", exercises: ["Flat Barbell Bench", "Incline DB Press", "Pec Deck / Machine Fly", "Seated Arnold Press", "Cable Lateral Raise", "Rope Pushdown"] },
+  { title: "CORE + MOBILITY", exercises: [] },
+  { title: "PULL DAY", exercises: ["Landmine Row", "Chest-Supported DB Row", "Neutral-Grip Pulldown", "Straight-Arm Pulldown", "Rear Delt Fly", "DB Shrugs", "Incline DB Curl"] },
+  { title: "LOWER + CORE", exercises: ["Leg Curl (machine)", "Leg Press", "Leg Extension", "Hip Thrust (bench)", "Walking Lunges", "Standing Calf Raises"] },
+  { title: "CORE + MOBILITY", exercises: [] },
+];
 
 void NOTIF_PERM_KEY; // referenced for completeness, used via localStorage key
 
@@ -95,176 +167,157 @@ const WEEK: WeekDay[] = [
   { short: "SAT", dayIndex: 6 },
 ];
 
+// JS day-of-week (0=Sun) → PROGRAM_DAYS index.
+// Mon → Foundational #1 (0), Tue → Progression Block (1), Wed → Foundational #2 (2),
+// Thu → Mobility + Core & Calf (3), Fri → Foundational #3 (4), Sat/Sun → rest.
 const DAY_MAP: { [dow: number]: number | null } = {
-  0: null, 1: 0, 2: 2, 3: 1, 4: 3, 5: 4, 6: null,
+  0: null, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: null,
 };
 
+// ── PISTOL SKILL ─────────────────────────────────────────────────────────────
+// Box Pistol only for now (no stage selector). Tracked left/right separately;
+// box height (inches) is the primary progression variable, counterbalance optional.
+// Start ~18–20" box (5–10 lb counterbalance allowed), advance toward ~16" at
+// 3×6/side. Eccentrics first at a new height. Elevate heel if ankle limits depth;
+// let the box set depth.
+const PISTOL_SKILL: SkillExercise[] = [
+  {
+    name: "Box Pistol", sets: 3, reps: "6-8/side",
+    hasBox: true, hasCounterbalance: true,
+    note: "Weaker side first. Box height (inches) is the primary progression variable — let the box set depth. Start ~18–20\", 5–10 lb counterbalance allowed, advance toward ~16\". Eccentrics first at a new height. Elevate heel if ankle limits depth; pelvis neutral.",
+  },
+];
+
+// Stock MAPS Symmetry Phase I foundational workout (identical for #1/#2/#3 in the
+// stock plan). Eli's only Phase-I mod to this list: DROP the Hanging Iso-Lat
+// Stretch. Reps/holds are the stock scheme (2×15s holds, 2×10, 2×10 each side).
+const PHASE1_FOUNDATIONAL: Exercise[] = [
+  { name: "Dunphy Squat Hold",            sets: 2, reps: "15s hold", note: "Sit into the suspension squat and hold — chest tall, weight in the heels." },
+  { name: "Hip Bridge Hold",              sets: 2, reps: "15s hold", note: "Drive through heels, squeeze glutes, hold — ribs down." },
+  { name: "Single-Leg Suspension Squat",  sets: 2, reps: "10/leg", unilateral: true, note: "Weaker side first. Use the straps for balance, control the descent." },
+  { name: "Single-Leg Toe Touch",         sets: 2, reps: "10/leg", unilateral: true, note: "Weaker side first. Hinge and reach — balance and hamstring control." },
+  { name: "Suspension Fly Hold",          sets: 2, reps: "15s hold", note: "Arms wide, hold the stretch position under tension." },
+  { name: "Suspension Extended Fly Hold", sets: 2, reps: "15s hold", note: "Longer lever than the fly hold — brace the core." },
+  { name: "Suspension Anchor Push-Up",    sets: 2, reps: "10/arm", unilateral: true, note: "Weaker side first." },
+  { name: "Suspension Row Hold",          sets: 2, reps: "15s hold", note: "Pull to the top and hold — shoulder blades down and back." },
+  { name: "Single-Arm Suspension Row",    sets: 2, reps: "10/arm", unilateral: true, note: "Weaker side first. Drive the elbow back, resist rotation." },
+  { name: "Thread The Needle Iso-\"Smash\"", sets: 2, reps: "15s/side", unilateral: true, note: "Weaker side first. Thoracic rotation under tension." },
+  { name: "Suspension \"W\" Hold",         sets: 2, reps: "15s hold", note: "Pull into a W, squeeze low traps — shoulder rehab-friendly." },
+  { name: "Suspension Crocodile \"I\"",    sets: 2, reps: "10/side", unilateral: true, note: "Weaker side first." },
+  { name: "Wrist CARS Quadruped",         sets: 2, reps: "15s hold", note: "Controlled wrist circles on all fours." },
+  { name: "Bicep Squeeze",                sets: 2, reps: "15s hold", note: "Peak-contraction isometric hold." },
+  { name: "Suspension Curls",             sets: 2, reps: "10", note: "Lean back, curl the body up, squeeze." },
+  { name: "Skull Crusher Iso-Hold",       sets: 2, reps: "15s hold", note: "Hold the stretched triceps position under tension." },
+  { name: "Diamond Hold",                 sets: 2, reps: "15s hold", note: "Diamond-hand push-up position hold — triceps." },
+  { name: "Suspension Skull Crusher",     sets: 2, reps: "10", note: "Hinge at the elbows, extend — control the return." },
+];
+
+// Standard PM stretches for the TRX foundational days.
+const FOUNDATIONAL_PM: WarmupItem[] = [
+  { name: "Doorway Chest Stretch", duration: "60s each side", cue: "Arm at 90°, lean into doorframe — don't arch your lower back" },
+  { name: "Child's Pose with Lat Reach", duration: "60s each side", cue: "Walk hands far to each side — feel the lat lengthen" },
+  { name: "Supine Spinal Twist", duration: "60s each side", cue: "Both shoulders stay on the floor — decompress the spine" },
+  { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "Hip external rotation — breathe into the tension" },
+];
+
+// ── PROGRAM ─────────────────────────────────────────────────────────────────
+// Stock MAPS Symmetry Phase I, adapted. 5 days, ~45-min cap, 60s rest, weaker
+// side first on all unilateral work.
+//   0 Mon  Foundational #1 (TRX/suspension, stock list minus hanging iso-lat stretch)
+//   1 Tue  Mobility Session #1 + box pistols + tracked progression work
+//   2 Wed  Foundational #2 (same TRX list)
+//   3 Thu  Mobility Session #2 + Core & Calf + box pistols
+//   4 Fri  Foundational #3 (same TRX list)
 const PROGRAM_DAYS: ProgramDay[] = [
   {
-    id: 0, title: "PUSH DAY", subtitle: "Chest · Shoulders · Triceps",
-    color: "#B85C38", isPool: false,
-    warmup: ["Band pull-aparts x15","Shoulder CARs x5/side","Scap push-ups x10","Light DB press x12"],
-    exercises: [
-      { name: "Flat Barbell Bench",     sets: 4, reps: "5-8",   note: "New primary — you hit 225x2 already. Feet flat, minimal arch, ribs down. No bridging off the bench." },
-      { name: "Incline DB Press",       sets: 3, reps: "8-10",  note: "Keeps upper chest in the block. Wider ROM than barbell, fixes side-to-side imbalance." },
-      { name: "Pec Deck / Machine Fly", sets: 3, reps: "12-15", note: "Back fully supported — pause 1 sec at peak contraction" },
-      { name: "Seated Arnold Press",    sets: 3, reps: "8-10",  note: "Rotate wrists through the press. Seated with back pad — no standing overhead work this block." },
-      { name: "Cable Lateral Raise",    sets: 4, reps: "12-15", note: "Single arm — lead with the elbow, not the hand. Keep building here." },
-      { name: "Rope Pushdown",          sets: 3, reps: "12-15", note: "Rotating off skull crushers — lateral head focus, flare the rope at the bottom" },
-    ],
-    pm: [
-      { name: "Doorway Chest Stretch", duration: "60s each side", cue: "Arm at 90°, lean into doorframe — don't arch your lower back" },
-      { name: "Cross-Body Shoulder Stretch", duration: "45s each side", cue: "Pull arm across chest, keep shoulder down" },
-      { name: "Overhead Triceps Stretch", duration: "45s each side", cue: "Elbow behind head, gently pull with other hand" },
-      { name: "Thread the Needle", duration: "45s each side", cue: "Thoracic rotation — shoulder reaches to floor" },
-      { name: "Child's Pose with Arm Reach", duration: "60s", cue: "Walk hands to one side to hit lat — swap sides. Prepares lats for Pull day tomorrow." },
-      { name: "Cat-Cow", duration: "10 slow reps", cue: "Decompress the spine before bed. Breathe deliberately." },
-    ],
+    id: 0, title: "FOUNDATIONAL #1", subtitle: "Phase I · TRX / suspension",
+    color: "#B85C38", kind: "foundational",
+    warmup: [],
+    exercises: PHASE1_FOUNDATIONAL,
+    pm: FOUNDATIONAL_PM,
   },
   {
-    id: 1, title: "CORE + MOBILITY", subtitle: "Recovery · Movement Quality",
-    color: "#4A7FA5", isPool: true,
-    warmup: [], exercises: [],
+    id: 1, title: "MOBILITY + PROGRESSION", subtitle: "Mobility · box pistols · tracked work",
+    color: "#4A7FA5", kind: "progression",
+    warmup: [],
+    exercises: [],
+    skill: PISTOL_SKILL,
+    tracked: [
+      { name: "Copenhagen Plank", sets: 2, target: "R 50s / L 45s (bent-knee baseline)", unilateral: true, metric: "time", note: "Baseline 9/8: bent-knee R 50s/45s, L 50s/40s. Bottom knee can touch floor to reduce load. Weaker side first." },
+      { name: "Single-Leg Glute Bridge", sets: 3, target: "R 10 / L 10-12", unilateral: true, metric: "reps", note: "Baseline R 10/10/8, L 10/12/10. Keep pelvis level — don't let one side drop. Weaker side first." },
+      { name: "Hollow-Body Hold", sets: 3, target: "35s / 24s / 30s", metric: "time", note: "Baseline 35s/24s/30s. Lower back stays pressed down, ribs in." },
+      { name: "Pallof Press", sets: 2, target: "22.5", unilateral: true, metric: "reps", note: "Working: 22.5. Press and hold — resist the cable pulling you sideways. Weaker side first." },
+      { name: "Face Pulls", sets: 3, target: "27.5", metric: "reps", note: "Working: 27.5. Rehab — non-negotiable while the left shoulder is impinged. High elbows, external rotation at the end." },
+      { name: "Prone Y-Raise", sets: 3, target: "weight × reps", metric: "weight", note: "Rehab for the shoulder — you can load this. Thumbs up, lift into a Y, squeeze low traps, no shrug." },
+    ],
+    pool: {
+      "Mobility Session #1": [
+        { name: "Foam Roll: Piriformis",       cue: "20+ seconds, ease into it" },
+        { name: "Foam Roll: IT Band",          cue: "20+ seconds per side" },
+        { name: "Foam Roll: Erector Spinae",   cue: "Low-back roll — go higher/lighter if it's tender" },
+        { name: "Foam Roll: Latissimus Dorsi", cue: "20+ seconds per side" },
+        { name: "Inch Worm to Upward Dog Walk", cue: "20 yards — walk it out, open the front line" },
+        { name: "90/90 Stretch",               cue: "10 reps each leg — feel both internal & external rotation" },
+        { name: "In-Step Lunge w/ Shoulder Rotations", cue: "20 yards — open through the thoracic spine" },
+        { name: "Knee Abduction",              cue: "30/30 reps — band or cable" },
+        { name: "Knee Adduction",              cue: "30/30 reps" },
+        { name: "Rubber Band Pull-A-Parts",    cue: "20 reps — shoulder rehab, high elbows" },
+        { name: "Rubber Band Internal Rotation", cue: "20/20 reps" },
+        { name: "Front-Loaded Kettlebell Walk", cue: "40 yards down & back — brace, ribs down" },
+        { name: "Suitcase Carry",              cue: "40 yards — tall posture, don't lean to the loaded side" },
+      ],
+    },
     pm: [
-      { name: "Supine Spinal Twist", duration: "90s each side", cue: "Both shoulders stay on the floor — don't force the rotation" },
       { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "Prioritize hip external rotation. Breathe into the tension." },
-      { name: "Legs Up the Wall", duration: "3–5 min", cue: "Passive hamstring/low back relief — great before sleep" },
-      { name: "Diaphragmatic Breathing", duration: "2 min", cue: "In through nose (belly rises), out slow through mouth. Activates parasympathetic." },
-    ],
-    pool: {
-      "Anti-Extension Core": [
-        { name: "Dead Bug",                cue: "Press lower back into floor, exhale fully at extension" },
-        { name: "Ab Wheel Rollout",        cue: "Brace hard, don't let hips sag" },
-        { name: "Plank with Shoulder Tap", cue: "Minimize hip rotation, breathe" },
-        { name: "Hollow Body Hold",        cue: "Lower back stays pressed down, ribs in" },
-        { name: "Ball Rollout",            cue: "Stability ball — more forgiving than ab wheel" },
-        { name: "V-Ups",                   cue: "Full extension at bottom, crunch up to meet feet — keep lower back from arching" },
-        { name: "Cable Crunch",            cue: "Kneel, pull elbows to knees — crunch from abs, not hip flexors" },
-        { name: "Decline Leg Raise",       cue: "Control the descent — lower back stays pressed into pad" },
-        { name: "Hanging Leg Raise",       cue: "Posterior pelvic tilt first, then raise — avoid swinging. Back-friendly when done right." },
-      ],
-      "Anti-Rotation / Lateral": [
-        { name: "Pallof Press",            cue: "Press and hold — resist the cable pulling you sideways" },
-        { name: "Side Plank",              cue: "Stacked or modified; add hip dip for progression" },
-        { name: "Copenhagen Plank",        cue: "Bottom knee can touch floor to reduce load" },
-        { name: "Single-Arm Farmer Carry", cue: "Tall posture, don't lean to the loaded side" },
-        { name: "Cable Woodchop",          cue: "Rotate from hips, not lumbar" },
-        { name: "Cable Lumberjack",        cue: "High-to-low diagonal pull — brace hard, rotate through thoracic not lumbar" },
-      ],
-      "Hip Hinge / Glute": [
-        { name: "Glute Bridge",            cue: "Drive through heels, squeeze at top" },
-        { name: "Single-Leg Glute Bridge", cue: "Keep pelvis level — don't let one side drop" },
-        { name: "Hip Thrust",              cue: "Chin tucked, ribs down — avoid hyperextending lumbar" },
-        { name: "Cable Pull-Through",      cue: "Hinge back, feel hamstring stretch, drive hips forward" },
-        { name: "Reverse Hyper",           cue: "Low load only; great for lumbar pump/rehab" },
-      ],
-      "Mobility / Flow": [
-        { name: "90/90 Hip Flow",          cue: "Controlled transitions, feel both internal/external rotation" },
-        { name: "World's Greatest Stretch",cue: "Slow and deliberate, no bouncing" },
-        { name: "Thoracic Rotation",       cue: "Keep lower back still, rotate mid-back only" },
-        { name: "Hip Flexor Stretch",      cue: "Posterior pelvic tilt first, then lean forward" },
-        { name: "Cat-Cow",                 cue: "Exhale into flexion, inhale into extension" },
-        { name: "Thread the Needle",       cue: "Shoulder to floor — great thoracic opener" },
-        { name: "Pigeon / Figure-4",       cue: "Figure-4 is safer if pigeon is too intense" },
-        { name: "Ankle Mobility Work",     cue: "Important for squat depth and knee health" },
-      ],
-      "Cardio": [
-        { name: "Incline Treadmill Walk",  cue: "10–12% incline, 20–40 min — great for glutes too" },
-        { name: "Stationary Bike",         cue: "Keep RPE low; this is active recovery" },
-        { name: "Elliptical",              cue: "Low joint stress — good if legs are sore" },
-        { name: "High Knees",              cue: "Drive knees to hip height, stay on balls of feet — good finisher or warm-up within the session" },
-      ],
-    },
-  },
-  {
-    id: 2, title: "PULL DAY", subtitle: "Back · Traps · Biceps",
-    color: "#B85C38", isPool: false,
-    warmup: ["Face pulls x15","Scap pull-ups x6","T-spine extensions x8","Cat-cow x10","Glute bridges x15"],
-    exercises: [
-      { name: "Landmine Row",           sets: 4, reps: "8-10",  note: "Replaces rack pulls. Hinge to ~45°, chest up, elbow drives back. Far less spinal load than a rack pull — but still brace." },
-      { name: "Chest-Supported DB Row", sets: 3, reps: "10-12", note: "Incline bench, chest on the pad. Zero spinal load — this is the back-safe row. Squeeze at the top." },
-      { name: "Neutral-Grip Pulldown",  sets: 3, reps: "8-10",  note: "Rotating off wide grip — neutral grip is easier on shoulders and hits lats slightly differently" },
-      { name: "Straight-Arm Pulldown",  sets: 3, reps: "12-15", note: "New — pure lat isolation, no biceps, no spinal load. Slight elbow bend, sweep the bar to your thighs." },
-      { name: "Rear Delt Fly",          sets: 3, reps: "15",    note: "Keep building — you're at 80lbs and still progressing" },
-      { name: "DB Shrugs",              sets: 3, reps: "12-15", note: "Primary trap work now that rack pulls are out. Slow eccentric, hold 1 sec at the top." },
-      { name: "Incline DB Curl",        sets: 3, reps: "10-12", note: "Rotating off EZ bar. Arms hang behind the body — stretches the long head. Expect to use less weight." },
-    ],
-    pm: [
-      { name: "Child's Pose with Lat Reach", duration: "60s each side", cue: "Walk hands far to each side — feel the lat lengthen. Priority after all that rowing." },
-      { name: "Doorway Biceps Stretch", duration: "45s each side", cue: "Arm straight back at shoulder height, rotate away. Forearm flush with wall." },
-      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Decompress the spine after all that pulling. Both shoulders down." },
-      { name: "Neck Side Stretch", duration: "30s each side", cue: "Ear toward shoulder, hand gently adds weight. Upper trap release." },
-      { name: "Hip Flexor Stretch (kneeling)", duration: "60s each side", cue: "Posterior tilt first — prepares hip flexors for Lower day tomorrow." },
-      { name: "Ankle Circles + Dorsiflexion", duration: "30s each side", cue: "2 min total. Easy prep for squatting tomorrow." },
+      { name: "Ankle Dorsiflexion Stretch", duration: "45s each side", cue: "Knee over toes against a wall — supports pistol depth" },
+      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Both shoulders stay on the floor" },
     ],
   },
   {
-    id: 3, title: "LOWER + CORE", subtitle: "Quads · Glutes · Hamstrings",
-    color: "#B85C38", isPool: false,
-    warmup: ["Hip rocks x10","Ankle mobility x10","BW squats x10","90/90 hip switches x8"],
-    exercises: [
-      { name: "Leg Curl (machine)",   sets: 3, reps: "12",     note: "Still first — hamstrings fresh. Time to move past 80lbs." },
-      { name: "Leg Press",            sets: 4, reps: "8-10",   note: "Staying — best quad loader you have with zero spinal compression. You're at 250, keep climbing." },
-      { name: "Leg Extension",        sets: 3, reps: "12-15",  note: "New — pure quad isolation, fully seated. Pause at lockout, control the negative." },
-      { name: "Hip Thrust (bench)",   sets: 3, reps: "10-12",  note: "Replaces single-leg RDL. Chin tucked, ribs DOWN, finish with a glute squeeze — do not hyperextend the lumbar at the top." },
-      { name: "Walking Lunges",       sets: 3, reps: "10/leg", note: "Rotating off Bulgarians. Shorter stride = more quad, longer = more glute. Torso upright." },
-      { name: "Standing Calf Raises", sets: 3, reps: "15-20",  note: "Pause at top, slow descent — you're at 300, plenty of room left" },
-    ],
-    pm: [
-      { name: "Standing Hamstring Stretch", duration: "60s each side", cue: "Foot on low surface, hinge at hip — don't round your back. Essential given your cramping history." },
-      { name: "Figure-4 Glute Stretch", duration: "90s each side", cue: "On back, ankle over opposite knee. Pull toward chest. Deep glute release." },
-      { name: "Couch Stretch (hip flexor)", duration: "60s each side", cue: "Back knee on floor, front foot forward — squeeze glute of back leg. Key for squat recovery." },
-      { name: "Calf Stretch (straight + bent knee)", duration: "45s each", cue: "Straight leg = gastrocnemius. Bent knee = soleus. Do both — addresses cramping." },
-      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Knees stacked and together. Lower back decompression after squatting and hinging." },
-      { name: "Legs Up the Wall", duration: "3 min", cue: "Passive hamstring/low back reset. Good wind-down before sleep." },
-    ],
+    id: 2, title: "FOUNDATIONAL #2", subtitle: "Phase I · TRX / suspension",
+    color: "#B85C38", kind: "foundational",
+    warmup: [],
+    exercises: PHASE1_FOUNDATIONAL,
+    pm: FOUNDATIONAL_PM,
   },
   {
-    id: 4, title: "CORE + MOBILITY", subtitle: "Recovery · Movement Quality",
-    color: "#4A7FA5", isPool: true,
+    id: 3, title: "MOBILITY + CORE & CALF", subtitle: "Mobility · core & calf · box pistols",
+    color: "#4A7FA5", kind: "mobility",
     warmup: [], exercises: [],
-    pm: [
-      { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "End of week — give the hips extra time here" },
-      { name: "Doorway Chest Stretch", duration: "60s each side", cue: "Light chest opener heading into the weekend" },
-      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Full spinal reset to close the training week" },
-      { name: "Legs Up the Wall", duration: "5 min", cue: "Earned it. Let the whole posterior chain drain out." },
-      { name: "Diaphragmatic Breathing", duration: "3 min", cue: "Slow it all the way down. Parasympathetic reset for the weekend." },
+    skill: PISTOL_SKILL,
+    coreCalf: [
+      { name: "Cable Chop", sets: 2, reps: "10/side", unilateral: true, note: "Stock Session #2 core move. Rotate from the hips/thoracic, not the lumbar. Weaker side first." },
+      { name: "Single-Leg Seated Calf Raise", sets: 2, reps: "10/side", unilateral: true, note: "Seated (standing calf raise is out — spinal loading). Pause at the top, slow descent. Weaker side first." },
     ],
     pool: {
-      "Anti-Extension Core": [
-        { name: "Dead Bug",                cue: "Press lower back into floor, exhale fully at extension" },
-        { name: "Ab Wheel Rollout",        cue: "Brace hard, don't let hips sag" },
-        { name: "Reverse Crunch",          cue: "Curl pelvis up, don't just swing legs" },
-        { name: "Hollow Body Hold",        cue: "Lower back stays pressed down, ribs in" },
-        { name: "V-Ups",                   cue: "Full extension at bottom, crunch up to meet feet — keep lower back from arching" },
-        { name: "Cable Crunch",            cue: "Kneel, pull elbows to knees — crunch from abs, not hip flexors" },
-        { name: "Decline Leg Raise",       cue: "Control the descent — lower back stays pressed into pad" },
-        { name: "Hanging Leg Raise",       cue: "Posterior pelvic tilt first, then raise — avoid swinging. Back-friendly when done right." },
-      ],
-      "Anti-Rotation / Lateral": [
-        { name: "Pallof Press",            cue: "Press and hold — resist the cable pulling you sideways" },
-        { name: "Side Plank",              cue: "Stacked or modified; add hip dip for progression" },
-        { name: "Single-Arm Farmer Carry", cue: "Tall posture, don't lean to the loaded side" },
-        { name: "Cable Lumberjack",        cue: "High-to-low diagonal pull — brace hard, rotate through thoracic not lumbar" },
-      ],
-      "Hip Hinge / Glute": [
-        { name: "Glute Bridge",            cue: "Drive through heels, squeeze at top" },
-        { name: "Hip Thrust",              cue: "Chin tucked, ribs down — avoid hyperextending lumbar" },
-        { name: "Cable Pull-Through",      cue: "Hinge back, feel hamstring stretch, drive hips forward" },
-      ],
-      "Mobility / Flow": [
-        { name: "90/90 Hip Flow",          cue: "Controlled transitions, feel both internal/external rotation" },
-        { name: "World's Greatest Stretch",cue: "Slow and deliberate, no bouncing" },
-        { name: "Thoracic Rotation",       cue: "Keep lower back still, rotate mid-back only" },
-        { name: "Cat-Cow",                 cue: "Exhale into flexion, inhale into extension" },
-        { name: "Thread the Needle",       cue: "Shoulder to floor — great thoracic opener" },
-      ],
-      "Cardio": [
-        { name: "Incline Treadmill Walk",  cue: "10–12% incline, 20–40 min" },
-        { name: "Stationary Bike",         cue: "Keep RPE low; this is active recovery" },
-        { name: "High Knees",              cue: "Drive knees to hip height, stay on balls of feet — good finisher or warm-up within the session" },
+      "Mobility Session #2": [
+        { name: "Lateral Lunge Hop",   cue: "40/40 yards — athletic, controlled landings" },
+        { name: "Walking Heel Squat",  cue: "40/40 yards" },
+        { name: "Inch Worms",          cue: "20 yards — walk the hands out, brace" },
+        { name: "Leg Swings",          cue: "20/20 reps — front-to-back and lateral" },
+        { name: "Walking Knee Raise",  cue: "40 yards — tall, drive the knee up" },
+        { name: "Stick Dislocates",    cue: "10 reps — slow, controlled shoulder ROM" },
+        { name: "Stick Wrap Arounds",  cue: "10/10 reps" },
+        { name: "Good Morning",        cue: "10 reps — light, hinge with a flat back; keep it easy on the low back" },
+        { name: "Dunphy Squat",        cue: "6–8 reps — deep supported squat, own the bottom" },
+        { name: "Lateral Drivers",     cue: "10/10 reps" },
+        { name: "Iso Drivers",         cue: "10 reps" },
+        { name: "Rotational Lunge",    cue: "10/10 reps — rotate through the hips/thoracic" },
       ],
     },
+    pm: [
+      { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "Give the hips extra time here" },
+      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Full spinal reset" },
+      { name: "Legs Up the Wall", duration: "3–5 min", cue: "Passive posterior-chain drain before sleep" },
+      { name: "Diaphragmatic Breathing", duration: "2 min", cue: "In through nose (belly rises), out slow. Parasympathetic reset." },
+    ],
+  },
+  {
+    id: 4, title: "FOUNDATIONAL #3", subtitle: "Phase I · TRX / suspension",
+    color: "#B85C38", kind: "foundational",
+    warmup: [],
+    exercises: PHASE1_FOUNDATIONAL,
+    pm: FOUNDATIONAL_PM,
   },
 ];
 
@@ -281,7 +334,15 @@ const POOL_COLORS: { [category: string]: string } = {
   "Hip Hinge / Glute": "#4A7FA5",
   "Mobility / Flow": "#5B8FA8",
   "Cardio": "#6B9DB8",
+  "Cardio (optional)": "#6B9DB8",
 };
+
+// Daily 5-minute bedtime routine — shown every day, including rest days.
+const BEDTIME_ROUTINE: WarmupItem[] = [
+  { name: "Half-Kneeling Hip Flexor Stretch", duration: "60s each side", cue: "Posterior pelvic tilt first, squeeze the down-side glute, then lean in" },
+  { name: "Cat-Cow", duration: "10 reps", cue: "Exhale into flexion, inhale into extension — decompress the spine" },
+  { name: "Supine Figure-4", duration: "45s each side", cue: "On your back, ankle over opposite knee, gently pull the thigh toward you" },
+];
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -321,11 +382,11 @@ function useTimer(onComplete: (() => void) | undefined): TimerHook {
   const [seconds, setSeconds] = useState<number | null>(null);
   const ref = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number | null>(null);
-  const durationRef = useRef<number>(90);
+  const durationRef = useRef<number>(60);
   const cbRef = useRef(onComplete);
   cbRef.current = onComplete;
 
-  const start = useCallback((s = 90) => {
+  const start = useCallback((s = 60) => {
     if (ref.current) clearInterval(ref.current);
     durationRef.current = s;
     startTimeRef.current = Date.now();
@@ -928,7 +989,7 @@ function PoolDay({ day, todayChecked, onToggle, freq }: PoolDayProps) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "14px" }}>
         <p style={{ color: "#5A5248", fontSize: "13px", margin: 0, lineHeight: 1.6 }}>
-          Pick 2–3 per category, finish with cardio.
+          Work through the session — tap to check off.
         </p>
         {checkedCount > 0 && (
           <span style={{ color: "#4A7FA5", fontSize: "11px", fontFamily: "'Space Mono', monospace", flexShrink: 0, marginLeft: "8px" }}>
@@ -1039,6 +1100,566 @@ function RestDayView() {
   );
 }
 
+// ── BEDTIME ROUTINE (daily, all days) ───────────────────────────────────────
+
+function BedtimeSection() {
+  const [collapsed, setCollapsed] = useState(true);
+  const [checked, setChecked] = useState<{ [idx: number]: boolean }>({});
+  const doneCount = Object.values(checked).filter(Boolean).length;
+  const allDone = doneCount === BEDTIME_ROUTINE.length;
+
+  return (
+    <div style={{ marginTop: "12px" }}>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          width: "100%", background: "none", border: "none", cursor: "pointer",
+          padding: "0 0 10px 0", display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ color: allDone ? "#7A5CA5" : "#5A5248", fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em" }}>
+            🌙 BEDTIME ROUTINE
+          </span>
+          {allDone && <span style={{ color: "#7A5CA5", fontSize: "11px", fontWeight: 700 }}>✓ DONE</span>}
+          {!allDone && doneCount > 0 && (
+            <span style={{ color: "#7A7268", fontSize: "11px", fontFamily: "'Space Mono', monospace" }}>{doneCount}/{BEDTIME_ROUTINE.length}</span>
+          )}
+        </div>
+        <span style={{ color: "#7A7268", fontSize: "14px" }}>{collapsed ? "+" : "−"}</span>
+      </button>
+
+      {!collapsed && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div style={{ color: "#8A7AA5", fontSize: "11px", marginBottom: "4px", fontStyle: "italic" }}>
+            5 minutes, every night — do these no matter which day it is.
+          </div>
+          {BEDTIME_ROUTINE.map((s, i) => {
+            const done = !!checked[i];
+            return (
+              <button
+                key={i}
+                onClick={() => setChecked(p => ({ ...p, [i]: !p[i] }))}
+                style={{
+                  display: "flex", alignItems: "flex-start",
+                  background: done ? "#EFEAF5" : "#EDE8DF",
+                  border: `1px solid ${done ? "#DDD0F0" : "#D8D2C8"}`,
+                  borderRadius: "10px", padding: "12px 14px",
+                  cursor: "pointer", textAlign: "left", gap: "12px", transition: "all 0.2s",
+                }}
+              >
+                <div style={{
+                  width: "20px", height: "20px", borderRadius: "50%", flexShrink: 0, marginTop: "1px",
+                  background: done ? "#7A5CA5" : "transparent",
+                  border: `1.5px solid ${done ? "#7A5CA5" : "#7A7268"}`,
+                  display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s",
+                }}>
+                  {done && <span style={{ color: "#F5F0E8", fontSize: "10px", fontWeight: 700 }}>✓</span>}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px", marginBottom: "3px" }}>
+                    <span style={{ color: done ? "#9A8AB5" : "#3A3028", fontSize: "13px", fontWeight: 600, textDecoration: done ? "line-through" : "none" }}>
+                      {s.name}
+                    </span>
+                    <span style={{ color: done ? "#B5A5C5" : "#7A5CA5", fontSize: "11px", fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
+                      {s.duration}
+                    </span>
+                  </div>
+                  <div style={{ color: done ? "#9A8AB5" : "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>
+                    {s.cue}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── COLLAPSIBLE SECTION ───────────────────────────────────────────────────────
+// Header bar that matches the mobility-pool category accordion, wrapping any
+// section content (box pistols, tracked work, core & calf) so those sections
+// visually match the mobility session on the same day.
+
+interface CollapsibleSectionProps {
+  title: string;
+  accent: string;
+  defaultOpen?: boolean;
+  doneCount?: number;
+  children: ReactNode;
+}
+
+function CollapsibleSection({ title, accent, defaultOpen = true, doneCount = 0, children }: CollapsibleSectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: "6px", border: `1px solid ${open ? accent + "55" : "#D8D2C8"}`, borderRadius: "12px", overflow: "hidden", transition: "border-color 0.2s" }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: "100%", background: open ? `${accent}10` : "#EDE8DF",
+        border: "none", padding: "13px 16px",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        cursor: "pointer", color: open ? accent : "#5A5248",
+        fontSize: "11px", fontFamily: "'DM Sans', sans-serif",
+        fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
+      }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: doneCount > 0 ? accent : "#7A7268", flexShrink: 0, transition: "background 0.2s" }} />
+          {title}
+          {doneCount > 0 && <span style={{ color: accent, fontSize: "10px", fontWeight: 700 }}>×{doneCount}</span>}
+        </span>
+        <span style={{ fontSize: "16px", opacity: 0.4 }}>{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div style={{ background: "#E8E2D8", padding: "12px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SKILL MODAL (pistol work: L/R reps + optional box height & counterbalance) ─
+
+interface SkillModalProps {
+  skill: SkillExercise;
+  setNum: number;
+  suggested: SetData | null;
+  onSave: (data: SetData) => void;
+  onClose: () => void;
+}
+
+function SkillModal({ skill, setNum, suggested, onSave, onClose }: SkillModalProps) {
+  const [repsL, setRepsL] = useState<string | null>(null);
+  const [repsR, setRepsR] = useState<string | null>(null);
+  const [box, setBox]     = useState<string | null>(null);
+  const [cb, setCb]       = useState<string | null>(null);
+
+  const dRepsL = repsL ?? suggested?.repsL ?? "";
+  const dRepsR = repsR ?? suggested?.repsR ?? "";
+  const dBox   = box   ?? suggested?.boxHeight ?? "";
+  const dCb    = cb    ?? suggested?.counterbalance ?? "";
+
+  const handleSave = () => {
+    const data: SetData = {
+      weight: "", reps: "",
+      repsL: repsL ?? suggested?.repsL ?? "",
+      repsR: repsR ?? suggested?.repsR ?? "",
+    };
+    if (skill.hasBox) data.boxHeight = box ?? suggested?.boxHeight ?? "";
+    if (skill.hasCounterbalance) data.counterbalance = cb ?? suggested?.counterbalance ?? "";
+    onSave(data);
+  };
+
+  const fieldStyle = {
+    width: "100%", background: "#E8E2D8", border: "1px solid #C8C0A8",
+    borderRadius: "12px", padding: "14px 12px", color: "#2A2420",
+    fontSize: "26px", fontFamily: "'Space Mono', monospace", fontWeight: 700,
+    outline: "none", boxSizing: "border-box" as const, textAlign: "center" as const,
+  };
+  const labelStyle = { color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" };
+
+  return (
+    <div onClick={onClose} className="set-modal-overlay">
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "#DDD7CC", border: "1px solid #7A7268",
+        borderRadius: "20px 20px 0 0", padding: "24px 24px calc(24px + env(safe-area-inset-bottom))",
+        width: "100%", maxWidth: "480px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+          <div>
+            <div style={{ color: "#2A2420", fontSize: "14px", fontWeight: 700, marginBottom: "4px" }}>{skill.name}</div>
+            <div style={{ color: "#5A5248", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>
+              LOG SET {setNum} <span style={{ color: "#7A7268" }}>/ {skill.sets}</span> · target {skill.reps}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#6A6258", fontSize: "20px", cursor: "pointer", padding: "0 4px" }}>×</button>
+        </div>
+        <div style={{ color: "#8A6A4A", fontSize: "11px", fontWeight: 700, marginBottom: "16px" }}>Log the WEAKER side first.</div>
+
+        {/* L / R reps */}
+        <div style={{ display: "flex", gap: "12px", marginBottom: "12px" }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>LEFT reps</label>
+            <input type="number" inputMode="decimal" value={dRepsL} autoFocus
+              onFocus={e => e.target.select()} onChange={e => setRepsL(e.target.value)} style={fieldStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>RIGHT reps</label>
+            <input type="number" inputMode="decimal" value={dRepsR}
+              onFocus={e => e.target.select()} onChange={e => setRepsR(e.target.value)} style={fieldStyle} />
+          </div>
+        </div>
+
+        {/* Box height + counterbalance */}
+        {(skill.hasBox || skill.hasCounterbalance) && (
+          <div style={{ display: "flex", gap: "12px", marginBottom: "16px" }}>
+            {skill.hasBox && (
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>BOX HEIGHT (in)</label>
+                <input type="number" inputMode="decimal" value={dBox}
+                  onFocus={e => e.target.select()} onChange={e => setBox(e.target.value)}
+                  style={{ ...fieldStyle, border: "1px solid #B85C38" }} />
+              </div>
+            )}
+            {skill.hasCounterbalance && (
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>COUNTERBAL (lb)</label>
+                <input type="number" inputMode="decimal" value={dCb}
+                  onFocus={e => e.target.select()} onChange={e => setCb(e.target.value)} style={fieldStyle} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <button onClick={handleSave} style={{
+          width: "100%", padding: "17px", background: "#4A7FA5",
+          border: "none", borderRadius: "12px", color: "#F5F0E8",
+          fontSize: "13px", fontWeight: 700, fontFamily: "'DM Sans', sans-serif",
+          cursor: "pointer", letterSpacing: "0.08em",
+        }}>
+          SAVE SET {setNum}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── SKILL CARD ────────────────────────────────────────────────────────────────
+
+interface SkillCardProps {
+  skill: SkillExercise;
+  accent: string;
+  logs: { [setNum: number]: SetData };
+  lastSessionLogs: { [setNum: number]: SetData } | null;
+  onLogSet: (setNum: number, data: SetData) => void;
+  onStartTimer: () => void;
+  onStopTimer: () => void;
+}
+
+function SkillCard({ skill, accent, logs, lastSessionLogs, onLogSet, onStartTimer, onStopTimer }: SkillCardProps) {
+  const [modal, setModal] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
+  const completed = Object.keys(logs).length;
+  const allDone = completed >= skill.sets;
+
+  const getSuggested = (setNum: number): SetData | null => {
+    if (setNum > 1 && logs[setNum - 1]) return logs[setNum - 1];
+    if (lastSessionLogs?.[setNum]) return lastSessionLogs[setNum];
+    if (lastSessionLogs?.[1]) return lastSessionLogs[1];
+    return null;
+  };
+
+  const fmt = (v: SetData): string => {
+    const lr = `L ${v.repsL || "?"} / R ${v.repsR || "?"}`;
+    const extra = [
+      v.boxHeight ? `${v.boxHeight}"` : "",
+      v.counterbalance ? `+${v.counterbalance}lb` : "",
+    ].filter(Boolean).join(" ");
+    return extra ? `${lr} · ${extra}` : lr;
+  };
+
+  return (
+    <>
+      <div style={{
+        background: allDone ? "#E8E6E2" : "#E8E2D8",
+        border: `1px solid ${allDone ? "#4A7A62" : accent + "50"}`,
+        borderRadius: "14px", padding: "16px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+          <div style={{ flex: 1, paddingRight: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{ color: allDone ? "#2E6B4A" : "#1A1410", fontWeight: 700, fontSize: "14px", lineHeight: 1.3 }}>
+                {allDone ? "✓ " : ""}{skill.name}
+              </span>
+              <button onClick={() => setShowInfo(v => !v)} style={{
+                background: showInfo ? "#D8D2C8" : "transparent", border: `1px solid ${showInfo ? "#B8B0A8" : "#C8C0A8"}`,
+                borderRadius: "50%", width: "18px", height: "18px", display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", flexShrink: 0, color: showInfo ? "#5A5248" : "#8A7A70", fontSize: "11px", fontWeight: 700, lineHeight: 1, padding: 0,
+              }}>i</button>
+            </div>
+            {showInfo && skill.note && (
+              <div style={{ marginTop: "8px", color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{skill.note}</div>
+            )}
+          </div>
+          <span style={{
+            color: accent, fontSize: "11px", fontWeight: 700, fontFamily: "'Space Mono', monospace",
+            background: `${accent}18`, padding: "5px 9px", borderRadius: "6px", flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            {skill.sets}×{skill.reps}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center" }}>
+          {Array.from({ length: skill.sets }).map((_, i) => {
+            const setNum = i + 1;
+            const log = logs[setNum];
+            const done = !!log;
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                <button
+                  onClick={() => { onStopTimer(); setModal(setNum); }}
+                  style={{
+                    width: "46px", height: "46px", borderRadius: "50%",
+                    background: done ? accent : "#D8D2C8",
+                    border: `2px solid ${done ? accent : accent + "40"}`,
+                    color: done ? "#fff" : "#666", fontSize: done ? "16px" : "13px",
+                    fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: "'Space Mono', monospace",
+                  }}
+                >
+                  {done ? "✓" : setNum}
+                </button>
+                {done && (
+                  <span style={{ color: "#6A6258", fontSize: "9px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
+                    {fmt(log)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {modal !== null && (
+        <SkillModal
+          skill={skill} setNum={modal} suggested={getSuggested(modal)}
+          onSave={data => { onLogSet(modal, data); setModal(null); onStartTimer(); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// ── TRACKED MODAL (PR-style: one value per set, L/R when unilateral) ──────────
+
+interface TrackedModalProps {
+  ex: TrackedExercise;
+  setNum: number;
+  suggested: SetData | null;
+  onSave: (data: SetData) => void;
+  onClose: () => void;
+}
+
+function TrackedModal({ ex, setNum, suggested, onSave, onClose }: TrackedModalProps) {
+  const [valueL, setValueL] = useState<string | null>(null);
+  const [valueR, setValueR] = useState<string | null>(null);
+  const [value, setValue]   = useState<string | null>(null);
+  const [weight, setWeight] = useState<string | null>(null);
+  const [reps, setReps]     = useState<string | null>(null);
+  const unit = ex.metric === "time" ? "sec" : "reps";
+  const weighted = ex.metric === "weight";
+
+  const dL = valueL ?? suggested?.valueL ?? "";
+  const dR = valueR ?? suggested?.valueR ?? "";
+  const dV = value  ?? suggested?.value  ?? "";
+  const dW = weight ?? suggested?.weight ?? "";
+  const dRp = reps  ?? suggested?.reps  ?? "";
+
+  const handleSave = () => {
+    const data: SetData = { weight: "", reps: "" };
+    if (weighted) {
+      data.weight = weight ?? suggested?.weight ?? "";
+      data.reps   = reps   ?? suggested?.reps   ?? "";
+    } else if (ex.unilateral) {
+      data.valueL = valueL ?? suggested?.valueL ?? "";
+      data.valueR = valueR ?? suggested?.valueR ?? "";
+    } else {
+      data.value = value ?? suggested?.value ?? "";
+    }
+    onSave(data);
+  };
+
+  const fieldStyle = {
+    width: "100%", background: "#E8E2D8", border: "1px solid #C8C0A8",
+    borderRadius: "12px", padding: "16px 12px", color: "#2A2420",
+    fontSize: "30px", fontFamily: "'Space Mono', monospace", fontWeight: 700,
+    outline: "none", boxSizing: "border-box" as const, textAlign: "center" as const,
+  };
+  const labelStyle = { color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" };
+
+  return (
+    <div onClick={onClose} className="set-modal-overlay">
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "#DDD7CC", border: "1px solid #7A7268",
+        borderRadius: "20px 20px 0 0", padding: "24px 24px calc(24px + env(safe-area-inset-bottom))",
+        width: "100%", maxWidth: "480px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+          <div>
+            <div style={{ color: "#2A2420", fontSize: "14px", fontWeight: 700, marginBottom: "4px" }}>{ex.name}</div>
+            <div style={{ color: "#5A5248", fontSize: "11px", letterSpacing: "0.12em", fontWeight: 700 }}>
+              LOG SET {setNum} <span style={{ color: "#7A7268" }}>/ {ex.sets}</span> · {ex.target}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#6A6258", fontSize: "20px", cursor: "pointer", padding: "0 4px" }}>×</button>
+        </div>
+        {ex.unilateral && <div style={{ color: "#8A6A4A", fontSize: "11px", fontWeight: 700, marginBottom: "16px" }}>Log the WEAKER side first.</div>}
+        {!ex.unilateral && <div style={{ marginBottom: "16px" }} />}
+
+        {weighted ? (
+          <div style={{ display: "flex", gap: "12px", marginBottom: "16px" }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>WEIGHT (lbs)</label>
+              <input type="number" inputMode="decimal" value={dW} autoFocus
+                onFocus={e => e.target.select()} onChange={e => setWeight(e.target.value)} style={fieldStyle} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>REPS</label>
+              <input type="number" inputMode="decimal" value={dRp}
+                onFocus={e => e.target.select()} onChange={e => setReps(e.target.value)} style={fieldStyle} />
+            </div>
+          </div>
+        ) : ex.unilateral ? (
+          <div style={{ display: "flex", gap: "12px", marginBottom: "16px" }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>LEFT ({unit})</label>
+              <input type="number" inputMode="decimal" value={dL} autoFocus
+                onFocus={e => e.target.select()} onChange={e => setValueL(e.target.value)} style={fieldStyle} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>RIGHT ({unit})</label>
+              <input type="number" inputMode="decimal" value={dR}
+                onFocus={e => e.target.select()} onChange={e => setValueR(e.target.value)} style={fieldStyle} />
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginBottom: "16px" }}>
+            <label style={labelStyle}>{unit.toUpperCase()}</label>
+            <input type="number" inputMode="decimal" value={dV} autoFocus
+              onFocus={e => e.target.select()} onChange={e => setValue(e.target.value)} style={fieldStyle} />
+          </div>
+        )}
+
+        <button onClick={handleSave} style={{
+          width: "100%", padding: "17px", background: "#4A7FA5",
+          border: "none", borderRadius: "12px", color: "#F5F0E8",
+          fontSize: "13px", fontWeight: 700, fontFamily: "'DM Sans', sans-serif",
+          cursor: "pointer", letterSpacing: "0.08em",
+        }}>
+          SAVE SET {setNum}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── TRACKED CARD ──────────────────────────────────────────────────────────────
+
+interface TrackedCardProps {
+  ex: TrackedExercise;
+  accent: string;
+  logs: { [setNum: number]: SetData };
+  lastSessionLogs: { [setNum: number]: SetData } | null;
+  onLogSet: (setNum: number, data: SetData) => void;
+  onStartTimer: () => void;
+  onStopTimer: () => void;
+}
+
+function TrackedCard({ ex, accent, logs, lastSessionLogs, onLogSet, onStartTimer, onStopTimer }: TrackedCardProps) {
+  const [modal, setModal] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
+  const completed = Object.keys(logs).length;
+  const allDone = completed >= ex.sets;
+  const unit = ex.metric === "time" ? "s" : "";
+
+  const getSuggested = (setNum: number): SetData | null => {
+    if (setNum > 1 && logs[setNum - 1]) return logs[setNum - 1];
+    if (lastSessionLogs?.[setNum]) return lastSessionLogs[setNum];
+    if (lastSessionLogs?.[1]) return lastSessionLogs[1];
+    return null;
+  };
+
+  const fmt = (v: SetData): string =>
+    ex.metric === "weight"
+      ? `${v.weight || "?"}×${v.reps || "?"}`
+      : ex.unilateral
+        ? `L ${v.valueL || "?"}${unit} / R ${v.valueR || "?"}${unit}`
+      : `${v.value || "?"}${unit}`;
+
+  const lastSummary = lastSessionLogs
+    ? Object.entries(lastSessionLogs).sort(([a], [b]) => Number(a) - Number(b)).map(([, v]) => fmt(v)).join(", ")
+    : null;
+
+  return (
+    <>
+      <div style={{
+        background: allDone ? "#E8E6E2" : "#EDE8DF",
+        border: `1px solid ${allDone ? "#4A7A62" : "#D8D2C8"}`,
+        borderRadius: "14px", padding: "16px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+          <div style={{ flex: 1, paddingRight: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{ color: allDone ? "#2E6B4A" : "#5A5248", fontWeight: 700, fontSize: "14px", lineHeight: 1.3 }}>
+                {allDone ? "✓ " : ""}{ex.name}
+              </span>
+              {(ex.note || lastSummary) && (
+                <button onClick={() => setShowInfo(v => !v)} style={{
+                  background: showInfo ? "#D8D2C8" : "transparent", border: `1px solid ${showInfo ? "#B8B0A8" : "#C8C0A8"}`,
+                  borderRadius: "50%", width: "18px", height: "18px", display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", flexShrink: 0, color: showInfo ? "#5A5248" : "#8A7A70", fontSize: "11px", fontWeight: 700, lineHeight: 1, padding: 0,
+                }}>i</button>
+              )}
+            </div>
+            {showInfo && (
+              <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                {ex.note && <div style={{ color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>}
+                {lastSummary && <div style={{ color: "#7A7268", fontSize: "11px" }}>Last week: <span style={{ fontFamily: "'Space Mono', monospace" }}>{lastSummary}</span></div>}
+              </div>
+            )}
+          </div>
+          <span style={{
+            color: "#6A6258", fontSize: "11px", fontWeight: 700, fontFamily: "'Space Mono', monospace",
+            background: "#E8E2D8", padding: "5px 9px", borderRadius: "6px", flexShrink: 0, whiteSpace: "nowrap", textAlign: "right",
+          }}>
+            {ex.target}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center" }}>
+          {Array.from({ length: ex.sets }).map((_, i) => {
+            const setNum = i + 1;
+            const log = logs[setNum];
+            const done = !!log;
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                <button
+                  onClick={() => { onStopTimer(); setModal(setNum); }}
+                  style={{
+                    width: "46px", height: "46px", borderRadius: "50%",
+                    background: done ? accent : "#E8E2D8",
+                    border: `2px solid ${done ? accent : "#C8C0A8"}`,
+                    color: done ? "#fff" : "#6A6258", fontSize: done ? "16px" : "13px",
+                    fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: "'Space Mono', monospace",
+                  }}
+                >
+                  {done ? "✓" : setNum}
+                </button>
+                {done && (
+                  <span style={{ color: "#6A6258", fontSize: "9px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
+                    {fmt(log)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {modal !== null && (
+        <TrackedModal
+          ex={ex} setNum={modal} suggested={getSuggested(modal)}
+          onSave={data => { onLogSet(modal, data); setModal(null); onStartTimer(); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </>
+  );
+}
+
 // ── LOG EXPORT MODAL ──────────────────────────────────────────────────────────
 
 interface ExportModalProps {
@@ -1051,28 +1672,110 @@ interface ExportModalProps {
 function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps) {
   const [copied, setCopied] = useState(false);
 
+  // Format a stored value for a set, choosing the representation that matches
+  // the fields present. Skill/tracked/unilateral records carry L/R (and box)
+  // instead of a single weight×reps.
+  const fmtSet = (v: SetData): string => {
+    if (v.repsL !== undefined || v.repsR !== undefined) {
+      const lr = `L ${v.repsL || "?"} / R ${v.repsR || "?"}`;
+      const extra = [v.boxHeight ? `box ${v.boxHeight}"` : "", v.counterbalance ? `+${v.counterbalance}lb` : ""].filter(Boolean).join(" ");
+      return extra ? `${lr} (${extra})` : lr;
+    }
+    if (v.valueL !== undefined || v.valueR !== undefined) return `L ${v.valueL || "?"} / R ${v.valueR || "?"}`;
+    if (v.value !== undefined) return `${v.value || "?"}`;
+    return `${v.weight || "?"}lbs × ${v.reps || "?"}`;
+  };
+
+  // Collect every set stored under a given key prefix, in set order.
+  const setsForPrefix = (dayLogs: DayLogs, prefix: string): string => {
+    return Object.entries(dayLogs)
+      .filter(([k]) => k.startsWith(prefix) && !Number.isNaN(parseInt(k.slice(prefix.length))))
+      .sort(([a], [b]) => parseInt(a.slice(prefix.length)) - parseInt(b.slice(prefix.length)))
+      .map(([, v]) => fmtSet(v))
+      .join(", ");
+  };
+
+  // ── Current (v2) program logs, labeled by the live program ──
   const formatted = Object.entries(allLogs)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([dateKey, dayLogs]) => {
       const parts = dateKey.split("|");
       const programIdx = parseInt(parts[1] ?? "");
       const day = PROGRAM_DAYS[programIdx];
-      if (!day || day.isPool) return null;
+      if (!day) return null;
       const lines = [`\n📅 ${parts[0]} — ${day.title}`];
-      day.exercises.forEach((ex, exIdx) => {
-        const sets = Object.entries(dayLogs)
-          .filter(([k]) => k.startsWith(`${exIdx}-`))
-          .sort(([a], [b]) => parseInt(a.split("-")[1]!) - parseInt(b.split("-")[1]!))
-          .map(([, v]) => `${v.weight || "?"}lbs × ${v.reps || "?"}`)
-          .join(", ");
-        if (sets) {
-          const note = notesLogs[dateKey]?.[`ex-${exIdx}`];
-          lines.push(`  ${ex.name}: ${sets}${note ? ` — "${note}"` : ""}`);
-        }
-      });
+
+      if (day.kind === "foundational") {
+        day.exercises.forEach((ex, exIdx) => {
+          const sets = setsForPrefix(dayLogs, `${exIdx}-`);
+          if (sets) {
+            const note = notesLogs[dateKey]?.[`ex-${exIdx}`];
+            lines.push(`  ${ex.name}: ${sets}${note ? ` — "${note}"` : ""}`);
+          }
+        });
+      } else if (day.kind === "progression") {
+        (day.skill ?? []).forEach((sk, i) => {
+          const sets = setsForPrefix(dayLogs, `skill-${i}-`);
+          if (sets) lines.push(`  ${sk.name}: ${sets}`);
+        });
+        (day.tracked ?? []).forEach((tr, i) => {
+          const sets = setsForPrefix(dayLogs, `tracked-${i}-`);
+          if (sets) lines.push(`  ${tr.name}: ${sets}`);
+        });
+      } else if (day.kind === "mobility") {
+        (day.skill ?? []).forEach((sk, i) => {
+          const sets = setsForPrefix(dayLogs, `skill-${i}-`);
+          if (sets) lines.push(`  ${sk.name}: ${sets}`);
+        });
+        (day.optionalSkill ?? []).forEach((sk, i) => {
+          const sets = setsForPrefix(dayLogs, `optskill-${i}-`);
+          if (sets) lines.push(`  ${sk.name} (optional): ${sets}`);
+        });
+        (day.coreCalf ?? []).forEach((ex, i) => {
+          const sets = setsForPrefix(dayLogs, `corecalf-${i}-`);
+          if (sets) lines.push(`  ${ex.name}: ${sets}`);
+        });
+      }
+
       const workoutNote = notesLogs[dateKey]?.["workout"];
       if (workoutNote) lines.push(`  📝 ${workoutNote}`);
-      return lines.join("\n");
+      // Only emit the day if it produced at least one exercise line.
+      return lines.length > 1 ? lines.join("\n") : null;
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  // ── Legacy (v1) history, labeled by the frozen LEGACY_PROGRAM snapshot ──
+  // Read directly from localStorage so old numbers stay attached to the exercise
+  // they were actually recorded for, instead of being remapped onto the new
+  // program's day/exercise order.
+  let legacyLogs: AllLogs = {};
+  let legacyNotes: NotesLogs = {};
+  try {
+    const s = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (s) legacyLogs = JSON.parse(s) as AllLogs;
+    const n = localStorage.getItem(LEGACY_NOTES_LOG_KEY);
+    if (n) legacyNotes = JSON.parse(n) as NotesLogs;
+  } catch (_) {}
+
+  const legacyFormatted = Object.entries(legacyLogs)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([dateKey, dayLogs]) => {
+      const parts = dateKey.split("|");
+      const programIdx = parseInt(parts[1] ?? "");
+      const legacyDay = LEGACY_PROGRAM[programIdx];
+      if (!legacyDay || legacyDay.exercises.length === 0) return null; // skip old pool days
+      const lines = [`\n📅 ${parts[0]} — ${legacyDay.title}`];
+      legacyDay.exercises.forEach((exName, exIdx) => {
+        const sets = setsForPrefix(dayLogs, `${exIdx}-`);
+        if (sets) {
+          const note = legacyNotes[dateKey]?.[`ex-${exIdx}`];
+          lines.push(`  ${exName}: ${sets}${note ? ` — "${note}"` : ""}`);
+        }
+      });
+      const workoutNote = legacyNotes[dateKey]?.["workout"];
+      if (workoutNote) lines.push(`  📝 ${workoutNote}`);
+      return lines.length > 1 ? lines.join("\n") : null;
     })
     .filter(Boolean)
     .join("\n");
@@ -1085,15 +1788,20 @@ function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps
     });
   });
   const coreSummary = Object.keys(coreFreqAll).length > 0
-    ? `\n\n📊 CORE EXERCISE FREQUENCY (all time)\n` +
+    ? `\n\n📊 CORE / MOBILITY EXERCISE FREQUENCY (all time)\n` +
       Object.entries(coreFreqAll)
         .sort(([, a], [, b]) => b - a)
         .map(([name, count]) => `  ${name}: ×${count}`)
         .join("\n")
     : "";
 
-  const exportText = formatted
-    ? `ELI'S WORKOUT LOG\nExported: ${new Date().toLocaleDateString()}\n${formatted}${coreSummary}\n\n---\nPaste this into Claude and ask for progress analysis, trend spotting, or recommendations.`
+  const legacySection = legacyFormatted
+    ? `\n\n———\n📦 EARLIER HISTORY (pre-2026-09-30 program)\nLabeled with the exercise names in use at the time — different program structure.\n${legacyFormatted}`
+    : "";
+
+  const body = [formatted, coreSummary, legacySection].filter(Boolean).join("");
+  const exportText = body
+    ? `ELI'S WORKOUT LOG\nExported: ${new Date().toLocaleDateString()}\n${body}\n\n---\nPaste this into Claude and ask for progress analysis, trend spotting, or recommendations.`
     : "No workout data logged yet.";
 
   const copy = () => {
@@ -1212,6 +1920,50 @@ export default function App() {
     return result;
   };
 
+  // Generic keyed logs for skill / tracked / core-calf entries. Keys look like
+  // "skill-0-1" (prefix "skill-0-", setNum 1). The trailing segment after the
+  // last "-" is the set number, so distinct prefixes never collide with the
+  // numeric "exIdx-setNum" foundational keys.
+  const getKeyedLogs = (prefix: string): { [setNum: number]: SetData } => {
+    const dayLogs = getDayLogs();
+    const result: { [setNum: number]: SetData } = {};
+    Object.entries(dayLogs).forEach(([k, v]) => {
+      if (k.startsWith(prefix)) {
+        const setNum = parseInt(k.slice(prefix.length));
+        if (!Number.isNaN(setNum)) result[setNum] = v;
+      }
+    });
+    return result;
+  };
+
+  const getLastSessionKeyedLogs = (prefix: string): { [setNum: number]: SetData } | null => {
+    const currentWeek = weekKey();
+    const matchingKeys = Object.keys(allLogs)
+      .filter(k => k.endsWith(`|${programDayIdx}`) && !k.startsWith(currentWeek))
+      .sort()
+      .reverse();
+    for (const key of matchingKeys) {
+      const dayLogs = allLogs[key];
+      const result: { [setNum: number]: SetData } = {};
+      Object.entries(dayLogs).forEach(([k, v]) => {
+        if (k.startsWith(prefix)) {
+          const setNum = parseInt(k.slice(prefix.length));
+          if (!Number.isNaN(setNum)) result[setNum] = v;
+        }
+      });
+      if (Object.keys(result).length > 0) return result;
+    }
+    return null;
+  };
+
+  const handleLogKeyed = (prefix: string, setNum: number, data: SetData) => {
+    const key = `${prefix}${setNum}`;
+    setAllLogs(prev => ({
+      ...prev,
+      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), [key]: data },
+    }));
+  };
+
   const getExNote = (exIdx: number): string =>
     notesLogs[dayStorageKey]?.[`ex-${exIdx}`] ?? "";
 
@@ -1265,12 +2017,12 @@ export default function App() {
       : nextExercise
         ? `Set 1 of ${nextExercise.name}`
         : null;
-    timer.start(90);
+    timer.start(60);
     if (nextLabel) sendNotification("Rest Complete ✓", nextLabel);
   };
 
-  const totalSets = day && !day.isPool ? day.exercises.reduce((a, ex) => a + ex.sets, 0) : 0;
-  const doneSets  = day && !day.isPool
+  const totalSets = day && day.kind === "foundational" ? day.exercises.reduce((a, ex) => a + ex.sets, 0) : 0;
+  const doneSets  = day && day.kind === "foundational"
     ? day.exercises.reduce((a, _ex, i) => a + Object.keys(getExLogs(i)).length, 0)
     : 0;
 
@@ -1280,10 +2032,10 @@ export default function App() {
   const activeDateStr = activeDayDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   const activeDateLabel = isToday ? `TODAY · ${activeDateStr}` : activeDateStr;
 
-  const nextEx = day && !day.isPool ? day.exercises[activeExIdx + 1] : null;
+  const nextEx = day && day.kind === "foundational" ? day.exercises[activeExIdx + 1] : null;
 
   // What to show in the rest timer banner
-  const currentEx = day && !day.isPool ? day.exercises[activeExIdx] : null;
+  const currentEx = day && day.kind === "foundational" ? day.exercises[activeExIdx] : null;
   const currentExCompletedSets = currentEx ? Object.keys(getExLogs(activeExIdx)).length : 0;
   const nextSetOfCurrent = currentEx && currentExCompletedSets < currentEx.sets
     ? `Set ${currentExCompletedSets + 1} of ${currentEx.name}`
@@ -1316,6 +2068,11 @@ export default function App() {
 
   const todayCoreChecked = coreLogs[todayKey()] || {};
   const coreFreq = getCoreFreq();
+
+  const nextDayIdx = DAY_MAP[(activeDow + 1) % 7];
+  const nextDayTitle = nextDayIdx !== null && nextDayIdx !== undefined
+    ? PROGRAM_DAYS[nextDayIdx]?.title ?? null
+    : null;
 
   return (
     <div className="app-outer" style={{ fontFamily: "'DM Sans', sans-serif" }}>
@@ -1391,7 +2148,7 @@ export default function App() {
       </div>
 
       {/* ── PROGRESS BAR ── */}
-      {!isRestDay && !day?.isPool && totalSets > 0 && (
+      {!isRestDay && day?.kind === "foundational" && totalSets > 0 && (
         <div style={{ padding: "14px 20px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
             <span style={{ color: "#7A7268", fontSize: "11px", letterSpacing: "0.08em", fontWeight: 700 }}>SETS COMPLETED</span>
@@ -1407,24 +2164,138 @@ export default function App() {
 
       {/* ── CONTENT ── */}
       <div style={{ padding: "14px 20px 0" }}>
-        {isRestDay ? <RestDayView /> : day.isPool ? (
+        {isRestDay ? (
           <>
+            <RestDayView />
+            <BedtimeSection />
+          </>
+        ) : day.kind === "progression" ? (
+          <>
+            {day.warmup.length > 0 && (
+              <WarmupSection
+                items={day.warmup}
+                accent={accent}
+                done={!!warmupLogs[dayStorageKey]}
+                onDone={() => setWarmupLogs(prev => ({ ...prev, [dayStorageKey]: true }))}
+              />
+            )}
+
+            {day.progressionNote && (
+              <div style={{ background: "#EAF0F5", border: "1px solid #C8DCE8", borderRadius: "12px", padding: "12px 14px", marginBottom: "14px" }}>
+                <span style={{ color: "#3A6A8A", fontSize: "12px", lineHeight: 1.5 }}>{day.progressionNote}</span>
+              </div>
+            )}
+
+            {/* Mobility Session #1 checklist */}
+            {day.pool && (
+              <PoolDay day={day} todayChecked={todayCoreChecked} onToggle={handleCoreToggle} freq={coreFreq} />
+            )}
+
+            {/* Box pistols */}
+            {day.skill && day.skill.length > 0 && (
+              <CollapsibleSection title="Box Pistols" accent={accent}>
+                {day.skill.map((sk, i) => (
+                  <SkillCard
+                    key={i} skill={sk} accent={accent}
+                    logs={getKeyedLogs(`skill-${i}-`)}
+                    lastSessionLogs={getLastSessionKeyedLogs(`skill-${i}-`)}
+                    onLogSet={(setNum, data) => handleLogKeyed(`skill-${i}-`, setNum, data)}
+                    onStartTimer={() => timer.start(60)}
+                    onStopTimer={timer.stop}
+                  />
+                ))}
+              </CollapsibleSection>
+            )}
+
+            {/* Tracked PR-style work */}
+            {day.tracked && day.tracked.length > 0 && (
+              <CollapsibleSection title="Tracked Work" accent={accent}>
+                {day.tracked.map((tr, i) => (
+                  <TrackedCard
+                    key={i} ex={tr} accent={accent}
+                    logs={getKeyedLogs(`tracked-${i}-`)}
+                    lastSessionLogs={getLastSessionKeyedLogs(`tracked-${i}-`)}
+                    onLogSet={(setNum, data) => handleLogKeyed(`tracked-${i}-`, setNum, data)}
+                    onStartTimer={() => timer.start(60)}
+                    onStopTimer={timer.stop}
+                  />
+                ))}
+              </CollapsibleSection>
+            )}
+
+            {/* Workout notes */}
+            <div style={{ marginTop: "4px", marginBottom: "4px" }}>
+              <div style={{ color: "#7A7268", fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", marginBottom: "8px" }}>WORKOUT NOTES</div>
+              <textarea
+                value={workoutNote}
+                onChange={e => handleWorkoutNoteChange(e.target.value)}
+                placeholder="How did the session feel? Any PRs, issues, or things to remember..."
+                rows={3}
+                style={{
+                  width: "100%", background: workoutNote ? "#E0DBD0" : "#EDE8DF",
+                  border: `1px solid ${workoutNote ? "#B8B0A8" : "#D0CAC0"}`,
+                  borderRadius: "10px", padding: "12px 14px",
+                  color: "#3A3028", fontSize: "13px", fontFamily: "'DM Sans', sans-serif",
+                  resize: "none", outline: "none", boxSizing: "border-box",
+                  lineHeight: 1.6, transition: "border-color 0.2s, background 0.2s",
+                }}
+                onFocus={e => { e.target.style.borderColor = accent; e.target.style.background = "#E0DBD0"; }}
+                onBlur={e => { e.target.style.borderColor = workoutNote ? "#B8B0A8" : "#D0CAC0"; if (!workoutNote) e.target.style.background = "#EDE8DF"; }}
+                onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+              />
+            </div>
+
+            {day.pm && <PMSection stretches={day.pm} nextDayTitle={nextDayTitle} />}
+            <BedtimeSection />
+          </>
+        ) : day.kind === "mobility" ? (
+          <>
+            {/* Mobility Session #2 checklist */}
             <PoolDay
               day={day}
               todayChecked={todayCoreChecked}
               onToggle={handleCoreToggle}
               freq={coreFreq}
             />
-            {day.pm && (
-              <PMSection
-                stretches={day.pm}
-                nextDayTitle={
-                  DAY_MAP[(activeDow + 1) % 7] !== null
-                    ? PROGRAM_DAYS[DAY_MAP[(activeDow + 1) % 7]!]?.title
-                    : null
-                }
-              />
+
+            {/* Core & Calf */}
+            {day.coreCalf && day.coreCalf.length > 0 && (
+              <div style={{ marginTop: "10px" }}>
+                <CollapsibleSection title="Core & Calf" accent={accent}>
+                  {day.coreCalf.map((ex, i) => (
+                    <TrackedCard
+                      key={i}
+                      ex={{ name: ex.name, sets: ex.sets, target: ex.reps, note: ex.note, unilateral: ex.unilateral, metric: "reps" }}
+                      accent={accent}
+                      logs={getKeyedLogs(`corecalf-${i}-`)}
+                      lastSessionLogs={getLastSessionKeyedLogs(`corecalf-${i}-`)}
+                      onLogSet={(setNum, data) => handleLogKeyed(`corecalf-${i}-`, setNum, data)}
+                      onStartTimer={() => timer.start(60)}
+                      onStopTimer={timer.stop}
+                    />
+                  ))}
+                </CollapsibleSection>
+              </div>
             )}
+
+            {/* Box pistols */}
+            {day.skill && day.skill.length > 0 && (
+              <CollapsibleSection title="Box Pistols" accent={accent}>
+                {day.skill.map((sk, i) => (
+                  <SkillCard
+                    key={i} skill={sk} accent={accent}
+                    logs={getKeyedLogs(`skill-${i}-`)}
+                    lastSessionLogs={getLastSessionKeyedLogs(`skill-${i}-`)}
+                    onLogSet={(setNum, data) => handleLogKeyed(`skill-${i}-`, setNum, data)}
+                    onStartTimer={() => timer.start(60)}
+                    onStopTimer={timer.stop}
+                  />
+                ))}
+              </CollapsibleSection>
+            )}
+
+            {day.pm && <PMSection stretches={day.pm} nextDayTitle={nextDayTitle} />}
+            <BedtimeSection />
           </>
         ) : (
           <>
@@ -1455,8 +2326,8 @@ export default function App() {
                 <div style={{ fontSize: "28px", marginBottom: "8px" }}>💪</div>
                 <div style={{ color: "#2E6B4A", fontWeight: 700, fontSize: "13px", fontFamily: "'Space Mono', monospace", letterSpacing: "0.06em" }}>WORKOUT COMPLETE</div>
                 <div style={{ color: "#4A6A58", fontSize: "12px", marginTop: "4px" }}>{totalSets} sets logged · Hit your protein</div>
-                {/* Export prompt only on Friday (program day 3 = Lower+Core) */}
-                {programDayIdx === 3 && (
+                {/* Export prompt after the last foundational day of the week (Fri = program day 4) */}
+                {programDayIdx === 4 && (
                   <button onClick={() => setShowExport(true)} style={{
                     marginTop: "12px", background: "none", border: "1px solid #4A7A62",
                     borderRadius: "8px", color: "#2E6B4A", fontSize: "11px",
@@ -1488,16 +2359,8 @@ export default function App() {
                 onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
               />
             </div>
-            {day.pm && (
-              <PMSection
-                stretches={day.pm}
-                nextDayTitle={
-                  DAY_MAP[(activeDow + 1) % 7] !== null
-                    ? PROGRAM_DAYS[DAY_MAP[(activeDow + 1) % 7]!]?.title
-                    : null
-                }
-              />
-            )}
+            {day.pm && <PMSection stretches={day.pm} nextDayTitle={nextDayTitle} />}
+            <BedtimeSection />
           </>
         )}
       </div>
