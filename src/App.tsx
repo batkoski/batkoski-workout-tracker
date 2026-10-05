@@ -16,6 +16,8 @@ interface Exercise {
   note: string;
   // Unilateral exercises track the weaker side first.
   unilateral?: boolean;
+  // Isometric hold — log an optional hold duration instead of weight/reps.
+  isHold?: boolean;
 }
 
 // A skill exercise (pistol progression) tracked left/right separately.
@@ -350,6 +352,19 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// True when an exercise's rep spec describes an isometric hold rather than reps.
+// Matches "15s hold", "15s/side", "20 sec", etc.
+function isHoldReps(reps: string): boolean {
+  return /hold/i.test(reps) || /\d+\s*s(ec)?\b/i.test(reps) || /\d+\s*s\//i.test(reps);
+}
+
+// Parse the target hold duration in seconds from a rep spec like "15s hold".
+// Returns "" if no number is found.
+function holdSeconds(reps: string): string {
+  const m = reps.match(/(\d+)/);
+  return m ? m[1] : "";
+}
+
 // Returns the ISO date string of the most recent Monday (or today if Monday).
 // Used as the week key so logs persist through the whole Mon–Sun week.
 function weekKey(): string {
@@ -427,18 +442,30 @@ interface SetModalProps {
   onSave: (data: SetData) => void;
   onClose: () => void;
   exerciseName: string;
+  isHold?: boolean;
+  holdDefault?: string; // target seconds, e.g. "15"
 }
 
-function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName }: SetModalProps) {
+function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName, isHold, holdDefault }: SetModalProps) {
   const [weight, setWeight] = useState<string | null>(null);
   const [reps,   setReps]   = useState<string | null>(null);
+  const [hold,   setHold]   = useState<string | null>(null);
 
   const displayWeight = weight ?? suggested?.weight ?? "";
   const displayReps   = reps   ?? suggested?.reps   ?? "";
   const weightIsDefault = weight === null && !!suggested?.weight;
   const repsIsDefault   = reps   === null && !!suggested?.reps;
 
+  // For hold exercises, pre-fill from the last logged hold, else the target.
+  const suggestedHold = suggested?.reps ? suggested.reps.replace(/s$/i, "") : holdDefault ?? "";
+  const displayHold = hold ?? suggestedHold;
+
   const handleSave = () => {
+    if (isHold) {
+      const secs = (hold ?? suggestedHold ?? "").toString().trim();
+      onSave({ weight: "", reps: secs ? `${secs}s` : "✓" });
+      return;
+    }
     onSave({
       weight: weight ?? suggested?.weight ?? "–",
       reps:   reps   ?? suggested?.reps   ?? "–",
@@ -462,6 +489,29 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName 
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#6A6258", fontSize: "20px", cursor: "pointer", padding: "0 4px" }}>×</button>
         </div>
 
+        {isHold ? (
+          <>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" }}>HOLD (seconds) — optional</label>
+              <input
+                type="number" inputMode="decimal"
+                value={displayHold}
+                autoFocus
+                onFocus={e => e.target.select()}
+                onChange={e => setHold(e.target.value)}
+                style={{
+                  width: "100%", background: "#E8E2D8", border: "1px solid #C8C0A8",
+                  borderRadius: "12px", padding: "16px 12px", color: "#2A2420",
+                  fontSize: "30px", fontFamily: "'Space Mono', monospace", fontWeight: 700,
+                  outline: "none", boxSizing: "border-box", textAlign: "center",
+                }}
+              />
+            </div>
+            <div style={{ color: "#8A7A70", fontSize: "11px", marginBottom: "16px", fontStyle: "italic" }}>
+              Isometric hold — leave as-is to just mark it done, or enter how long you actually held.
+            </div>
+          </>
+        ) : (
         <div style={{ display: "flex", gap: "12px", marginBottom: "8px" }}>
           {/* WEIGHT */}
           <div style={{ flex: 1 }}>
@@ -503,8 +553,9 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName 
             />
           </div>
         </div>
+        )}
 
-        {(!weightIsDefault && !repsIsDefault) && <div style={{ marginBottom: "16px" }} />}
+        {(!isHold && !weightIsDefault && !repsIsDefault) && <div style={{ marginBottom: "16px" }} />}
 
         <button onClick={handleSave} style={{
           width: "100%", padding: "17px", background: "#B85C38",
@@ -693,6 +744,8 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
   const [doneCollapsed, setDoneCollapsed] = useState(true);
   const completedSets = Object.keys(logs).length;
   const allDone = completedSets >= ex.sets;
+  const hold = ex.isHold ?? isHoldReps(ex.reps);
+  const holdTarget = holdSeconds(ex.reps);
 
   const getSuggested = (setNum: number): SetData | null => {
     if (setNum > 1 && logs[setNum - 1]) return logs[setNum - 1];
@@ -704,7 +757,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
   const lastSessionSummary = lastSessionLogs
     ? Object.entries(lastSessionLogs)
         .sort(([a], [b]) => Number(a) - Number(b))
-        .map(([, v]) => `${v.weight}×${v.reps}`)
+        .map(([, v]) => (v.weight && v.reps ? `${v.weight}×${v.reps}` : v.reps || v.weight || ""))
         .join(", ")
     : null;
 
@@ -737,7 +790,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ color: "#2E6B4A", fontWeight: 700, fontSize: "13px" }}>✓ {ex.name}</span>
               <span style={{ color: "#2E6B4A", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em" }}>
-                {doneCollapsed ? "DONE" : "−"}
+                {doneCollapsed ? "DONE" : "TAP A SET TO EDIT"}
               </span>
             </div>
             {!doneCollapsed && (
@@ -745,17 +798,24 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                 {Array.from({ length: ex.sets }).map((_, i) => {
                   const setNum = i + 1;
                   const log = logs[setNum];
+                  const valLabel = log
+                    ? (log.weight && log.reps ? `${log.weight}×${log.reps}` : log.reps || log.weight || "")
+                    : "";
                   return (
                     <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
-                      <div style={{
-                        width: "46px", height: "46px", borderRadius: "50%",
-                        background: "#2E6B4A", border: `2px solid #2E6B4A`,
-                        color: "#fff", fontSize: "16px", fontWeight: 700,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>✓</div>
-                      {log && (log.weight || log.reps) && (
+                      <button
+                        onClick={e => { e.stopPropagation(); onStopTimer(); setModal(setNum); }}
+                        style={{
+                          width: "46px", height: "46px", borderRadius: "50%",
+                          background: "#2E6B4A", border: `2px solid #2E6B4A`,
+                          color: "#fff", fontSize: "16px", fontWeight: 700, cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontFamily: "'Space Mono', monospace",
+                        }}
+                      >✓</button>
+                      {valLabel && (
                         <span style={{ color: "#4A7A62", fontSize: "10px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
-                          {log.weight}{log.reps ? `×${log.reps}` : ""}
+                          {valLabel}
                         </span>
                       )}
                     </div>
@@ -838,7 +898,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                     </button>
                     {done && (log.weight || log.reps) && (
                       <span style={{ color: "#6A6258", fontSize: "10px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
-                        {log.weight}{log.reps ? `×${log.reps}` : ""}
+                        {log.weight && log.reps ? `${log.weight}×${log.reps}` : log.reps || log.weight}
                       </span>
                     )}
                   </div>
@@ -875,6 +935,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
         <SetModal
           setNum={modal} totalSets={ex.sets} suggested={getSuggested(modal)}
           exerciseName={ex.name}
+          isHold={hold} holdDefault={holdTarget}
           onSave={data => { onLogSet(exIdx, modal, data); setModal(null); onStartTimer(exIdx, modal); }}
           onClose={() => setModal(null)}
         />
@@ -1683,7 +1744,9 @@ function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps
     }
     if (v.valueL !== undefined || v.valueR !== undefined) return `L ${v.valueL || "?"} / R ${v.valueR || "?"}`;
     if (v.value !== undefined) return `${v.value || "?"}`;
-    return `${v.weight || "?"}lbs × ${v.reps || "?"}`;
+    // Hold / bodyweight set: no weight, reps carries the hold time or a check.
+    if (!v.weight) return v.reps || "✓";
+    return `${v.weight}lbs × ${v.reps || "?"}`;
   };
 
   // Collect every set stored under a given key prefix, in set order.
