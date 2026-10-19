@@ -18,6 +18,8 @@ interface Exercise {
   unilateral?: boolean;
   // Isometric hold — log an optional hold duration instead of weight/reps.
   isHold?: boolean;
+  // Rest timer length after a logged set, in seconds. Defaults to 60.
+  restSeconds?: number;
 }
 
 // A skill exercise (pistol progression) tracked left/right separately.
@@ -135,15 +137,58 @@ interface RestTip {
 // untouched. The v1 logs are still surfaced (read-only) in the export, labeled with
 // a frozen snapshot of the v1 program so old numbers stay attached to the exercise
 // they were actually recorded for.
-const STORAGE_KEY = "eli_workout_logs_v2";
+//
+// v3 (2026-10-19): the MAPS Symmetry program was replaced by the 5-day Lift / Core /
+// Hips plan. Same problem, same fix: every positionally-keyed store (workout logs,
+// warm-up checks, notes) moves to fresh v3 keys, and the v2 data is left untouched and
+// exported under the frozen LEGACY_V2_PROGRAM labels below. The core/mobility
+// checklist log is keyed by exercise NAME (not position), so it keeps its v2 key.
+const STORAGE_KEY = "eli_workout_logs_v3";
 const CORE_LOG_KEY = "eli_core_logs_v2";
-const WARMUP_LOG_KEY = "eli_warmup_logs_v2";
-const NOTES_LOG_KEY = "eli_notes_logs_v2";
+const WARMUP_LOG_KEY = "eli_warmup_logs_v3";
+const NOTES_LOG_KEY = "eli_notes_logs_v3";
 const NOTIF_PERM_KEY = "eli_notif_permission";
+
+// Symmetry-era (2026-09-30 → 2026-10-19) storage keys — read only, for exporting history.
+const LEGACY_V2_STORAGE_KEY = "eli_workout_logs_v2";
+const LEGACY_V2_NOTES_LOG_KEY = "eli_notes_logs_v2";
 
 // Legacy (pre-2026-09-30) storage keys — read only, for exporting past history.
 const LEGACY_STORAGE_KEY = "eli_workout_logs_v1";
 const LEGACY_NOTES_LOG_KEY = "eli_notes_logs_v1";
+
+// Names of the sections a day's logs can be stored under, used to label history.
+// Keys look like "<exIdx>-<set>", "skill-<i>-<set>", "tracked-<i>-<set>",
+// "optskill-<i>-<set>" and "corecalf-<i>-<set>".
+interface DaySnapshot {
+  title: string;
+  skill?: string[];
+  tracked?: string[];
+  optionalSkill?: string[];
+  exercises?: string[];
+  coreCalf?: string[];
+}
+
+// Frozen snapshot of the v2 (MAPS Symmetry) program, in the exact index order the v2
+// logs were stored under. Used ONLY to label historical v2 logs on export. Do not edit.
+const FOUNDATIONAL_V2_NAMES = [
+  "Dunphy Squat Hold", "Hip Bridge Hold", "Single-Leg Suspension Squat", "Single-Leg Toe Touch",
+  "Suspension Fly Hold", "Suspension Extended Fly Hold", "Suspension Anchor Push-Up",
+  "Suspension Row Hold", "Single-Arm Suspension Row", "Thread The Needle Iso-\"Smash\"",
+  "Suspension \"W\" Hold", "Suspension Crocodile \"I\"", "Wrist CARS Quadruped", "Bicep Squeeze",
+  "Suspension Curls", "Skull Crusher Iso-Hold", "Diamond Hold", "Suspension Skull Crusher",
+];
+const LEGACY_V2_PROGRAM: DaySnapshot[] = [
+  { title: "FOUNDATIONAL #1", exercises: FOUNDATIONAL_V2_NAMES },
+  {
+    title: "MOBILITY + PROGRESSION",
+    skill: ["Box Pistol"],
+    tracked: ["Copenhagen Plank", "Single-Leg Glute Bridge", "Hollow-Body Hold", "Pallof Press", "Face Pulls", "Prone Y-Raise"],
+  },
+  { title: "FOUNDATIONAL #2", exercises: FOUNDATIONAL_V2_NAMES },
+  { title: "MOBILITY + CORE & CALF", skill: ["Box Pistol"], coreCalf: ["Cable Chop", "Single-Leg Seated Calf Raise"] },
+  { title: "FOUNDATIONAL #3", exercises: FOUNDATIONAL_V2_NAMES },
+];
 
 // Frozen snapshot of the v1 program's day titles + exercise names, in the exact
 // index order they were stored under. Used ONLY to label historical v1 logs on
@@ -170,156 +215,178 @@ const WEEK: WeekDay[] = [
 ];
 
 // JS day-of-week (0=Sun) → PROGRAM_DAYS index.
-// Mon → Foundational #1 (0), Tue → Progression Block (1), Wed → Foundational #2 (2),
-// Thu → Mobility + Core & Calf (3), Fri → Foundational #3 (4), Sat/Sun → rest.
+// Mon → Lift A (0), Tue → Core + T-Spine (1), Wed → Hips + Functional (2),
+// Thu → Lift B (3), Fri → Aesthetic Core + Upper (4), Sat/Sun → rest.
 const DAY_MAP: { [dow: number]: number | null } = {
   0: null, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: null,
 };
 
-// ── PISTOL SKILL ─────────────────────────────────────────────────────────────
-// Box Pistol only for now (no stage selector). Tracked left/right separately;
-// box height (inches) is the primary progression variable, counterbalance optional.
-// Start ~18–20" box (5–10 lb counterbalance allowed), advance toward ~16" at
-// 3×6/side. Eccentrics first at a new height. Elevate heel if ankle limits depth;
-// let the box set depth.
+// ── BOX PISTOL SKILL ─────────────────────────────────────────────────────────
+// Tracked left/right separately; box height (inches) is the primary progression
+// variable, counterbalance optional. Stay at a box height until 3×8/side on both
+// sides, then drop it. Eccentrics first at a new height. Elevate the heel if ankle
+// mobility limits depth; let the box set depth.
 const PISTOL_SKILL: SkillExercise[] = [
   {
-    name: "Box Pistol", sets: 3, reps: "6-8/side",
+    name: "Box Pistol", sets: 3, reps: "8/side",
     hasBox: true, hasCounterbalance: true,
-    note: "Weaker side first. Box height (inches) is the primary progression variable — let the box set depth. Start ~18–20\", 5–10 lb counterbalance allowed, advance toward ~16\". Eccentrics first at a new height. Elevate heel if ankle limits depth; pelvis neutral.",
+    note: "Weaker side first. Box height (inches) is the progression variable — stay at the current height until you hit 3×8 on both sides, then drop it. Eccentrics first at a new height. Elevate the heel if ankle mobility limits depth; pelvis neutral. Last logged: 16\" box, 7/7 and 6/6 (10/5).",
   },
 ];
 
-// Stock MAPS Symmetry Phase I foundational workout (identical for #1/#2/#3 in the
-// stock plan). Eli's only Phase-I mod to this list: DROP the Hanging Iso-Lat
-// Stretch. Reps/holds are the stock scheme (2×15s holds, 2×10, 2×10 each side).
-const PHASE1_FOUNDATIONAL: Exercise[] = [
-  { name: "Dunphy Squat Hold",            sets: 2, reps: "15s hold", note: "Sit into the suspension squat and hold — chest tall, weight in the heels." },
-  { name: "Hip Bridge Hold",              sets: 2, reps: "15s hold", note: "Drive through heels, squeeze glutes, hold — ribs down." },
-  { name: "Single-Leg Suspension Squat",  sets: 2, reps: "10/leg", unilateral: true, note: "Weaker side first. Use the straps for balance, control the descent." },
-  { name: "Single-Leg Toe Touch",         sets: 2, reps: "10/leg", unilateral: true, note: "Weaker side first. Hinge and reach — balance and hamstring control." },
-  { name: "Suspension Fly Hold",          sets: 2, reps: "15s hold", note: "Arms wide, hold the stretch position under tension." },
-  { name: "Suspension Extended Fly Hold", sets: 2, reps: "15s hold", note: "Longer lever than the fly hold — brace the core." },
-  { name: "Suspension Anchor Push-Up",    sets: 2, reps: "10/arm", unilateral: true, note: "Weaker side first." },
-  { name: "Suspension Row Hold",          sets: 2, reps: "15s hold", note: "Pull to the top and hold — shoulder blades down and back." },
-  { name: "Single-Arm Suspension Row",    sets: 2, reps: "10/arm", unilateral: true, note: "Weaker side first. Drive the elbow back, resist rotation." },
-  { name: "Thread The Needle Iso-\"Smash\"", sets: 2, reps: "15s/side", unilateral: true, note: "Weaker side first. Thoracic rotation under tension." },
-  { name: "Suspension \"W\" Hold",         sets: 2, reps: "15s hold", note: "Pull into a W, squeeze low traps — shoulder rehab-friendly." },
-  { name: "Suspension Crocodile \"I\"",    sets: 2, reps: "10/side", unilateral: true, note: "Weaker side first." },
-  { name: "Wrist CARS Quadruped",         sets: 2, reps: "15s hold", note: "Controlled wrist circles on all fours." },
-  { name: "Bicep Squeeze",                sets: 2, reps: "15s hold", note: "Peak-contraction isometric hold." },
-  { name: "Suspension Curls",             sets: 2, reps: "10", note: "Lean back, curl the body up, squeeze." },
-  { name: "Skull Crusher Iso-Hold",       sets: 2, reps: "15s hold", note: "Hold the stretched triceps position under tension." },
-  { name: "Diamond Hold",                 sets: 2, reps: "15s hold", note: "Diamond-hand push-up position hold — triceps." },
-  { name: "Suspension Skull Crusher",     sets: 2, reps: "10", note: "Hinge at the elbows, extend — control the return." },
+// Optional 5-minute openers. Lift days get the short version; the three functional
+// days get the full t-spine + hip opener.
+const LIFT_WARMUP: string[] = [
+  "Thread-the-needle × 8/side",
+  "Cat-cow × 10",
+  "One light warm-up set of your first lift (~50% load)",
+];
+const FUNCTIONAL_WARMUP: string[] = [
+  "Thread-the-needle × 8/side",
+  "Quadruped t-spine rotations × 8/side",
+  "90/90 hip switches × 8",
+  "Cat-cow × 10",
 ];
 
-// Standard PM stretches for the TRX foundational days.
-const FOUNDATIONAL_PM: WarmupItem[] = [
-  { name: "Doorway Chest Stretch", duration: "60s each side", cue: "Arm at 90°, lean into doorframe — don't arch your lower back" },
-  { name: "Child's Pose with Lat Reach", duration: "60s each side", cue: "Walk hands far to each side — feel the lat lengthen" },
-  { name: "Supine Spinal Twist", duration: "60s each side", cue: "Both shoulders stay on the floor — decompress the spine" },
-  { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "Hip external rotation — breathe into the tension" },
+// Short evening items shown on every training day. The bedtime routine (hip flexor,
+// cat-cow, figure-4) is separate and shows every day including rest days.
+const PM_ROUTINE: WarmupItem[] = [
+  { name: "Seated Nerve Glide", duration: "10 gentle reps each leg", cue: "Slump slightly, straighten the knee while pulling the toes up, then bend it back as the toes point down. Stop at the first tension — never pull into a stretch." },
+  { name: "Supine Spinal Twist", duration: "60s each side", cue: "Both shoulders stay on the floor — decompress the spine." },
+];
+
+// ── LIFT DAYS ────────────────────────────────────────────────────────────────
+// Muscle-retention work, ~45 min: straight sets on one station at a time (no
+// machine-hogging supersets). Stop each set 1–2 reps short of failure; keep the same
+// exercises week to week and progress load once the top of the rep range is easy.
+// "Last logged" numbers come from the Sept 2026 history so week 1 can start ~85–90% of
+// them after the month off.
+const LIFT_A: Exercise[] = [
+  { name: "Leg Press", sets: 3, reps: "8", restSeconds: 90,
+    note: "Last logged: 230×8–10 (9/14), 270×7 (9/7). Controlled depth, pelvis stays flat on the pad." },
+  { name: "Neutral-Grip Pulldown", sets: 3, reps: "8-10", restSeconds: 90,
+    note: "Last logged: 145×8–10 (9/7). Drive elbows to ribs, ribs down, no swinging." },
+  { name: "Barbell Bench Press", sets: 3, reps: "5-6", restSeconds: 120,
+    note: "Last logged: 185×8,7,6 (9/7). Shoulder blades back and down, feet planted. Set the safety pins when lifting without a spotter." },
+  { name: "Chest-Supported DB Row", sets: 2, reps: "10-12", restSeconds: 90,
+    note: "Last logged: 45s×11–12 (8/31). Chest stays on the pad; squeeze the shoulder blades together without shrugging." },
+  { name: "Biceps Curl (incline DB or curved bar)", sets: 2, reps: "10-12",
+    note: "Incline DB version when a bench is free (last logged 25×10, 8/31); curved bar otherwise. Log the load you used so weeks compare." },
+  { name: "Rope Pushdown", sets: 2, reps: "10-12",
+    note: "Last logged: 60×10 (8/24). Elbows pinned to your sides." },
+];
+
+const LIFT_B: Exercise[] = [
+  { name: "Neutral-Grip Incline DB Press", sets: 3, reps: "8", restSeconds: 90,
+    note: "Palms facing each other, elbows ~45° from the torso. Last logged (palms forward): 65×10,9,6 (9/7); neutral grip usually runs 5–10 lb lighter. Left shoulder: stop the set at any pinch at the front or top." },
+  { name: "Landmine Row", sets: 3, reps: "8", restSeconds: 90,
+    note: "Last logged: 125×8–10 (9/7). Hinge from the hips, flat back. If your low back (not your lats) is what's limiting you, swap to a chest-supported row." },
+  { name: "Leg Press", sets: 2, reps: "8", restSeconds: 90,
+    note: "Same load as Lift A or slightly lighter." },
+  { name: "Leg Extension", sets: 2, reps: "12",
+    note: "Last logged: 105×14–16 (9/7). Squeeze at the top, slow lowering." },
+  { name: "Face Pull", sets: 2, reps: "15",
+    note: "Working weight ~27.5. High elbows, finish with external rotation. Shoulder-friendly rear-delt and rotator cuff work." },
+  { name: "Biceps Curl (incline DB or curved bar)", sets: 2, reps: "12",
+    note: "Light and clean. Log the load you used." },
+];
+
+// ── FUNCTIONAL DAYS ──────────────────────────────────────────────────────────
+// Core strength, t-spine, hips, and aesthetic core work. Holds are logged in seconds,
+// weaker side first on anything unilateral (log the shorter side when a set covers both).
+const CORE_TSPINE: Exercise[] = [
+  { name: "Ab Wheel Rollout (from knees)", sets: 3, reps: "6-10",
+    note: "Ribs down, glutes squeezed. End the set when your low back starts to sag; shorten the range if it sags before rep 6." },
+  { name: "Pallof Press", sets: 3, reps: "10/side", unilateral: true,
+    note: "Last logged: 22.5. Press out and hold 2 seconds — resist the cable rotating you. Weaker side first." },
+  { name: "Side Plank + Top-Leg Raise", sets: 3, reps: "30-40s/side", unilateral: true,
+    note: "Same lateral chain as the Copenhagen plank. Log the shorter side's time. Weaker side first." },
+  { name: "Dead Bug", sets: 2, reps: "8/side", unilateral: true,
+    note: "Slow. Low back stays pressed into the floor; exhale as the leg extends." },
+  { name: "Suspension \"W\" Hold", sets: 3, reps: "20-25s",
+    note: "Pull into a W, squeeze the low traps, shoulder blades down and back." },
+  { name: "Suspension Extended Fly Hold", sets: 3, reps: "20-25s",
+    note: "Longer lever than the fly hold — brace the core, shoulder blades stay down." },
+  { name: "Foam Roller T-Spine Extension", sets: 2, reps: "8",
+    note: "Roller across the mid-back, hands behind the head, extend over it one segment at a time. Ribs down so the extension comes from the t-spine, not the low back." },
+];
+
+const HIPS_FUNCTIONAL: Exercise[] = [
+  { name: "Cossack Squat", sets: 2, reps: "8/side", unilateral: true,
+    note: "Sit toward one side with the other leg straight; hold a light weight in front for counterbalance if depth is limited. Go only as deep as it stays smooth — a pulling feeling down the back of the leg means ease off." },
+  { name: "Deep Squat Hold + T-Spine Reach", sets: 2, reps: "45s hold",
+    note: "Heels down, chest tall. Alternate reaching an arm to the ceiling and rotating through the upper back." },
+  { name: "90/90 Hip Lift-Off", sets: 2, reps: "6/side", unilateral: true,
+    note: "From 90/90 sitting, lift the front shin off the floor using hip rotation strength, not momentum. Weaker side first." },
+  { name: "Suitcase Carry", sets: 3, reps: "30 m/side", unilateral: true, restSeconds: 90,
+    note: "Log the load as weight and the distance per side as reps. Start light (about 40–50 lb). Stay tall — don't lean toward the loaded side. Stop if the low back complains." },
+];
+
+const AESTHETIC_CORE: Exercise[] = [
+  { name: "Kneeling Cable Crunch", sets: 3, reps: "10-15",
+    note: "Curl ribs toward pelvis with hips fixed — don't pull with the arms. Start light, add a little weight each week once form is clean. Stop if the low back protests." },
+  { name: "Knee Raise (hanging or captain's chair)", sets: 3, reps: "10-12",
+    note: "Curl the pelvis up instead of swinging the legs. Slow lowering." },
+  { name: "Suspension Fallout / Body Saw", sets: 3, reps: "8-10",
+    note: "Anti-extension: ribs down, glutes squeezed. Shorten the lever if the low back sags." },
+  { name: "Cable Chop", sets: 2, reps: "12/side", unilateral: true,
+    note: "Rotate from the hips and thoracic spine, not the low back. Weaker side first." },
+  { name: "Suspension Row", sets: 2, reps: "10-12",
+    note: "Body in a straight line, pull the chest to the handles, shoulder blades down and back." },
+  { name: "Suspension Anchor Push-Up", sets: 2, reps: "10-12",
+    note: "Slow lowering. Stop short of any pinch in the left shoulder." },
+  { name: "Bear Crawl", sets: 2, reps: "20-30s",
+    note: "Knees an inch off the floor, move slowly or hold a hover. Log the seconds." },
 ];
 
 // ── PROGRAM ─────────────────────────────────────────────────────────────────
-// Stock MAPS Symmetry Phase I, adapted. 5 days, ~45-min cap, 60s rest, weaker
-// side first on all unilateral work.
-//   0 Mon  Foundational #1 (TRX/suspension, stock list minus hanging iso-lat stretch)
-//   1 Tue  Mobility Session #1 + box pistols + tracked progression work
-//   2 Wed  Foundational #2 (same TRX list)
-//   3 Thu  Mobility Session #2 + Core & Calf + box pistols
-//   4 Fri  Foundational #3 (same TRX list)
+// 5 days, ~45-min cap, weaker side first on unilateral work. Lifting is 2 days/week
+// for muscle retention; the other 3 days build the core, t-spine and hips.
+//   0 Mon  Lift A                 (legs / pull / bench / arms)
+//   1 Tue  Core + T-Spine         (anti-extension / anti-rotation, scapular holds)
+//   2 Wed  Hips + Functional      (box pistol, Copenhagen, bridges, carries)
+//   3 Thu  Lift B                 (incline press / row / legs / arms)
+//   4 Fri  Aesthetic Core + Upper (weighted flexion, upper stability)
 const PROGRAM_DAYS: ProgramDay[] = [
   {
-    id: 0, title: "FOUNDATIONAL #1", subtitle: "Phase I · TRX / suspension",
+    id: 0, title: "LIFT A", subtitle: "Strength · muscle retention · ~45 min",
     color: "#B85C38", kind: "foundational",
-    warmup: [],
-    exercises: PHASE1_FOUNDATIONAL,
-    pm: FOUNDATIONAL_PM,
+    warmup: LIFT_WARMUP,
+    exercises: LIFT_A,
+    pm: PM_ROUTINE,
   },
   {
-    id: 1, title: "MOBILITY + PROGRESSION", subtitle: "Mobility · box pistols · tracked work",
-    color: "#4A7FA5", kind: "progression",
-    warmup: [],
-    exercises: [],
+    id: 1, title: "CORE + T-SPINE", subtitle: "Core strength · scapular holds · t-spine",
+    color: "#4A7FA5", kind: "foundational",
+    warmup: FUNCTIONAL_WARMUP,
+    exercises: CORE_TSPINE,
+    pm: PM_ROUTINE,
+  },
+  {
+    id: 2, title: "HIPS + FUNCTIONAL", subtitle: "Box pistol · Copenhagen · hips · carries",
+    color: "#4A7FA5", kind: "foundational",
+    warmup: FUNCTIONAL_WARMUP,
     skill: PISTOL_SKILL,
     tracked: [
-      { name: "Copenhagen Plank", sets: 2, target: "R 50s / L 45s (bent-knee baseline)", unilateral: true, metric: "time", note: "Baseline 9/8: bent-knee R 50s/45s, L 50s/40s. Bottom knee can touch floor to reduce load. Weaker side first." },
-      { name: "Single-Leg Glute Bridge", sets: 3, target: "R 10 / L 10-12", unilateral: true, metric: "reps", note: "Baseline R 10/10/8, L 10/12/10. Keep pelvis level — don't let one side drop. Weaker side first." },
-      { name: "Hollow-Body Hold", sets: 3, target: "35s / 24s / 30s", metric: "time", note: "Baseline 35s/24s/30s. Lower back stays pressed down, ribs in." },
-      { name: "Pallof Press", sets: 2, target: "22.5", unilateral: true, metric: "reps", note: "Working: 22.5. Press and hold — resist the cable pulling you sideways. Weaker side first." },
-      { name: "Face Pulls", sets: 3, target: "27.5", metric: "reps", note: "Working: 27.5. Rehab — non-negotiable while the left shoulder is impinged. High elbows, external rotation at the end." },
-      { name: "Prone Y-Raise", sets: 3, target: "weight × reps", metric: "weight", note: "Rehab for the shoulder — you can load this. Thumbs up, lift into a Y, squeeze low traps, no shrug." },
+      { name: "Copenhagen Plank", sets: 3, target: "30–40s each side", unilateral: true, metric: "time", note: "Last logged: L 40 / R 38–40 (10/5). Bottom knee can touch the floor to reduce load. Weaker side first." },
+      { name: "Single-Leg Glute Bridge", sets: 3, target: "12 each side", unilateral: true, metric: "reps", note: "Last logged: 12/12/12 both sides (10/5). Keep the pelvis level — don't let one side drop. Weaker side first." },
     ],
-    pool: {
-      "Mobility Session #1": [
-        { name: "Foam Roll: Piriformis",       cue: "20+ seconds, ease into it" },
-        { name: "Foam Roll: IT Band",          cue: "20+ seconds per side" },
-        { name: "Foam Roll: Erector Spinae",   cue: "Low-back roll — go higher/lighter if it's tender" },
-        { name: "Foam Roll: Latissimus Dorsi", cue: "20+ seconds per side" },
-        { name: "Inch Worm to Upward Dog Walk", cue: "20 yards — walk it out, open the front line" },
-        { name: "90/90 Stretch",               cue: "10 reps each leg — feel both internal & external rotation" },
-        { name: "In-Step Lunge w/ Shoulder Rotations", cue: "20 yards — open through the thoracic spine" },
-        { name: "Knee Abduction",              cue: "30/30 reps — band or cable" },
-        { name: "Knee Adduction",              cue: "30/30 reps" },
-        { name: "Rubber Band Pull-A-Parts",    cue: "20 reps — shoulder rehab, high elbows" },
-        { name: "Rubber Band Internal Rotation", cue: "20/20 reps" },
-        { name: "Front-Loaded Kettlebell Walk", cue: "40 yards down & back — brace, ribs down" },
-        { name: "Suitcase Carry",              cue: "40 yards — tall posture, don't lean to the loaded side" },
-      ],
-    },
-    pm: [
-      { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "Prioritize hip external rotation. Breathe into the tension." },
-      { name: "Ankle Dorsiflexion Stretch", duration: "45s each side", cue: "Knee over toes against a wall — supports pistol depth" },
-      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Both shoulders stay on the floor" },
-    ],
+    exercises: HIPS_FUNCTIONAL,
+    pm: PM_ROUTINE,
   },
   {
-    id: 2, title: "FOUNDATIONAL #2", subtitle: "Phase I · TRX / suspension",
+    id: 3, title: "LIFT B", subtitle: "Strength · muscle retention · ~45 min",
     color: "#B85C38", kind: "foundational",
-    warmup: [],
-    exercises: PHASE1_FOUNDATIONAL,
-    pm: FOUNDATIONAL_PM,
+    warmup: LIFT_WARMUP,
+    exercises: LIFT_B,
+    pm: PM_ROUTINE,
   },
   {
-    id: 3, title: "MOBILITY + CORE & CALF", subtitle: "Mobility · core & calf · box pistols",
-    color: "#4A7FA5", kind: "mobility",
-    warmup: [], exercises: [],
-    skill: PISTOL_SKILL,
-    coreCalf: [
-      { name: "Cable Chop", sets: 2, reps: "10/side", unilateral: true, note: "Stock Session #2 core move. Rotate from the hips/thoracic, not the lumbar. Weaker side first." },
-      { name: "Single-Leg Seated Calf Raise", sets: 2, reps: "10/side", unilateral: true, note: "Seated (standing calf raise is out — spinal loading). Pause at the top, slow descent. Weaker side first." },
-    ],
-    pool: {
-      "Mobility Session #2": [
-        { name: "Lateral Lunge Hop",   cue: "40/40 yards — athletic, controlled landings" },
-        { name: "Walking Heel Squat",  cue: "40/40 yards" },
-        { name: "Inch Worms",          cue: "20 yards — walk the hands out, brace" },
-        { name: "Leg Swings",          cue: "20/20 reps — front-to-back and lateral" },
-        { name: "Walking Knee Raise",  cue: "40 yards — tall, drive the knee up" },
-        { name: "Stick Dislocates",    cue: "10 reps — slow, controlled shoulder ROM" },
-        { name: "Stick Wrap Arounds",  cue: "10/10 reps" },
-        { name: "Good Morning",        cue: "10 reps — light, hinge with a flat back; keep it easy on the low back" },
-        { name: "Dunphy Squat",        cue: "6–8 reps — deep supported squat, own the bottom" },
-        { name: "Lateral Drivers",     cue: "10/10 reps" },
-        { name: "Iso Drivers",         cue: "10 reps" },
-        { name: "Rotational Lunge",    cue: "10/10 reps — rotate through the hips/thoracic" },
-      ],
-    },
-    pm: [
-      { name: "Figure-4 / Pigeon", duration: "90s each side", cue: "Give the hips extra time here" },
-      { name: "Supine Spinal Twist", duration: "60s each side", cue: "Full spinal reset" },
-      { name: "Legs Up the Wall", duration: "3–5 min", cue: "Passive posterior-chain drain before sleep" },
-      { name: "Diaphragmatic Breathing", duration: "2 min", cue: "In through nose (belly rises), out slow. Parasympathetic reset." },
-    ],
-  },
-  {
-    id: 4, title: "FOUNDATIONAL #3", subtitle: "Phase I · TRX / suspension",
-    color: "#B85C38", kind: "foundational",
-    warmup: [],
-    exercises: PHASE1_FOUNDATIONAL,
-    pm: FOUNDATIONAL_PM,
+    id: 4, title: "AESTHETIC CORE + UPPER", subtitle: "Weighted flexion · anti-extension · upper stability",
+    color: "#4A7FA5", kind: "foundational",
+    warmup: FUNCTIONAL_WARMUP,
+    exercises: AESTHETIC_CORE,
+    pm: PM_ROUTINE,
   },
 ];
 
@@ -1758,55 +1825,76 @@ function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps
       .join(", ");
   };
 
-  // ── Current (v2) program logs, labeled by the live program ──
-  const formatted = Object.entries(allLogs)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dateKey, dayLogs]) => {
-      const parts = dateKey.split("|");
-      const programIdx = parseInt(parts[1] ?? "");
-      const day = PROGRAM_DAYS[programIdx];
-      if (!day) return null;
-      const lines = [`\n📅 ${parts[0]} — ${day.title}`];
+  // Name lists for a live program day, in the order its logs are stored.
+  const snapshotOf = (d: ProgramDay): DaySnapshot => ({
+    title: d.title,
+    skill: d.skill?.map(x => x.name),
+    tracked: d.tracked?.map(x => x.name),
+    optionalSkill: d.optionalSkill?.map(x => x.name),
+    exercises: d.exercises.map(x => x.name),
+    coreCalf: d.coreCalf?.map(x => x.name),
+  });
 
-      if (day.kind === "foundational") {
-        day.exercises.forEach((ex, exIdx) => {
+  // Format one program's logs against a list of day snapshots (the live program, or a
+  // frozen one for history), so numbers always render under the exercise they were
+  // recorded for.
+  const formatProgramLogs = (logs: AllLogs, notes: NotesLogs, days: DaySnapshot[]): string =>
+    Object.entries(logs)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([dateKey, dayLogs]) => {
+        const parts = dateKey.split("|");
+        const programIdx = parseInt(parts[1] ?? "");
+        const day = days[programIdx];
+        if (!day) return null;
+        const lines = [`\n📅 ${parts[0]} — ${day.title}`];
+
+        (day.skill ?? []).forEach((name, i) => {
+          const sets = setsForPrefix(dayLogs, `skill-${i}-`);
+          if (sets) lines.push(`  ${name}: ${sets}`);
+        });
+        (day.tracked ?? []).forEach((name, i) => {
+          const sets = setsForPrefix(dayLogs, `tracked-${i}-`);
+          if (sets) lines.push(`  ${name}: ${sets}`);
+        });
+        (day.optionalSkill ?? []).forEach((name, i) => {
+          const sets = setsForPrefix(dayLogs, `optskill-${i}-`);
+          if (sets) lines.push(`  ${name} (optional): ${sets}`);
+        });
+        (day.exercises ?? []).forEach((name, exIdx) => {
           const sets = setsForPrefix(dayLogs, `${exIdx}-`);
           if (sets) {
-            const note = notesLogs[dateKey]?.[`ex-${exIdx}`];
-            lines.push(`  ${ex.name}: ${sets}${note ? ` — "${note}"` : ""}`);
+            const note = notes[dateKey]?.[`ex-${exIdx}`];
+            lines.push(`  ${name}: ${sets}${note ? ` — "${note}"` : ""}`);
           }
         });
-      } else if (day.kind === "progression") {
-        (day.skill ?? []).forEach((sk, i) => {
-          const sets = setsForPrefix(dayLogs, `skill-${i}-`);
-          if (sets) lines.push(`  ${sk.name}: ${sets}`);
-        });
-        (day.tracked ?? []).forEach((tr, i) => {
-          const sets = setsForPrefix(dayLogs, `tracked-${i}-`);
-          if (sets) lines.push(`  ${tr.name}: ${sets}`);
-        });
-      } else if (day.kind === "mobility") {
-        (day.skill ?? []).forEach((sk, i) => {
-          const sets = setsForPrefix(dayLogs, `skill-${i}-`);
-          if (sets) lines.push(`  ${sk.name}: ${sets}`);
-        });
-        (day.optionalSkill ?? []).forEach((sk, i) => {
-          const sets = setsForPrefix(dayLogs, `optskill-${i}-`);
-          if (sets) lines.push(`  ${sk.name} (optional): ${sets}`);
-        });
-        (day.coreCalf ?? []).forEach((ex, i) => {
+        (day.coreCalf ?? []).forEach((name, i) => {
           const sets = setsForPrefix(dayLogs, `corecalf-${i}-`);
-          if (sets) lines.push(`  ${ex.name}: ${sets}`);
+          if (sets) lines.push(`  ${name}: ${sets}`);
         });
-      }
 
-      const workoutNote = notesLogs[dateKey]?.["workout"];
-      if (workoutNote) lines.push(`  📝 ${workoutNote}`);
-      // Only emit the day if it produced at least one exercise line.
-      return lines.length > 1 ? lines.join("\n") : null;
-    })
-    .filter(Boolean)
-    .join("\n");
+        const workoutNote = notes[dateKey]?.["workout"];
+        if (workoutNote) lines.push(`  📝 ${workoutNote}`);
+        // Only emit the day if it produced at least one exercise line.
+        return lines.length > 1 ? lines.join("\n") : null;
+      })
+      .filter(Boolean)
+      .join("\n");
+
+  // ── Current (v3) program logs, labeled by the live program ──
+  const formatted = formatProgramLogs(allLogs, notesLogs, PROGRAM_DAYS.map(snapshotOf));
+
+  // ── Symmetry-era (v2) history, labeled by the frozen LEGACY_V2_PROGRAM snapshot ──
+  // Read straight from localStorage: the v2 keys are no longer written, so nothing
+  // here can be remapped onto the new program's day/exercise order.
+  let symmetryLogs: AllLogs = {};
+  let symmetryNotes: NotesLogs = {};
+  try {
+    const s2 = localStorage.getItem(LEGACY_V2_STORAGE_KEY);
+    if (s2) symmetryLogs = JSON.parse(s2) as AllLogs;
+    const n2 = localStorage.getItem(LEGACY_V2_NOTES_LOG_KEY);
+    if (n2) symmetryNotes = JSON.parse(n2) as NotesLogs;
+  } catch (_) {}
+  const symmetryFormatted = formatProgramLogs(symmetryLogs, symmetryNotes, LEGACY_V2_PROGRAM);
 
   // ── Legacy (v1) history, labeled by the frozen LEGACY_PROGRAM snapshot ──
   // Read directly from localStorage so old numbers stay attached to the exercise
@@ -1862,7 +1950,11 @@ function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps
     ? `\n\n———\n📦 EARLIER HISTORY (pre-2026-09-30 program)\nLabeled with the exercise names in use at the time — different program structure.\n${legacyFormatted}`
     : "";
 
-  const body = [formatted, coreSummary, legacySection].filter(Boolean).join("");
+  const symmetrySection = symmetryFormatted
+    ? `\n\n———\n📦 MAPS SYMMETRY HISTORY (program replaced 2026-10-19)\nLabeled with the Symmetry program's exercise names — a different program structure from the current plan. Hold times in the earliest Foundational entries (10/5, Foundational #1) were saved as reps, not seconds.\n${symmetryFormatted}`
+    : "";
+
+  const body = [formatted, coreSummary, symmetrySection, legacySection].filter(Boolean).join("");
   const exportText = body
     ? `ELI'S WORKOUT LOG\nExported: ${new Date().toLocaleDateString()}\n${body}\n\n---\nPaste this into Claude and ask for progress analysis, trend spotting, or recommendations.`
     : "No workout data logged yet.";
@@ -2080,14 +2172,26 @@ export default function App() {
       : nextExercise
         ? `Set 1 of ${nextExercise.name}`
         : null;
-    timer.start(60);
+    timer.start(ex.restSeconds ?? 60);
     if (nextLabel) sendNotification("Rest Complete ✓", nextLabel);
   };
 
-  const totalSets = day && day.kind === "foundational" ? day.exercises.reduce((a, ex) => a + ex.sets, 0) : 0;
+  // Progress counts the regular exercise list plus any box-pistol / tracked work on the
+  // same day (the hips day has all three).
+  const keyedCount = (prefix: string): number => Object.keys(getKeyedLogs(prefix)).length;
+  const totalSets = day && day.kind === "foundational"
+    ? day.exercises.reduce((a, ex) => a + ex.sets, 0)
+      + (day.skill ?? []).reduce((a, sk) => a + sk.sets, 0)
+      + (day.tracked ?? []).reduce((a, tr) => a + tr.sets, 0)
+    : 0;
   const doneSets  = day && day.kind === "foundational"
     ? day.exercises.reduce((a, _ex, i) => a + Object.keys(getExLogs(i)).length, 0)
+      + (day.skill ?? []).reduce((a, _sk, i) => a + keyedCount(`skill-${i}-`), 0)
+      + (day.tracked ?? []).reduce((a, _tr, i) => a + keyedCount(`tracked-${i}-`), 0)
     : 0;
+  // Counts for the WORKOUT section header only (regular exercise list).
+  const exTotalSets = day ? day.exercises.reduce((a, ex) => a + ex.sets, 0) : 0;
+  const exDoneSets = day ? day.exercises.reduce((a, _ex, i) => a + Object.keys(getExLogs(i)).length, 0) : 0;
 
   // Date for whichever day is selected in the strip
   const activeDayDate = new Date();
@@ -2370,11 +2474,43 @@ export default function App() {
                 onDone={() => setWarmupLogs(prev => ({ ...prev, [dayStorageKey]: true }))}
               />
             )}
+            {/* Box pistols (hips day) */}
+            {day.skill && day.skill.length > 0 && (
+              <CollapsibleSection title="Box Pistols" accent={accent}>
+                {day.skill.map((sk, i) => (
+                  <SkillCard
+                    key={i} skill={sk} accent={accent}
+                    logs={getKeyedLogs(`skill-${i}-`)}
+                    lastSessionLogs={getLastSessionKeyedLogs(`skill-${i}-`)}
+                    onLogSet={(setNum, data) => handleLogKeyed(`skill-${i}-`, setNum, data)}
+                    onStartTimer={() => timer.start(60)}
+                    onStopTimer={timer.stop}
+                  />
+                ))}
+              </CollapsibleSection>
+            )}
+
+            {/* Left/right tracked work (Copenhagen plank, single-leg bridge) */}
+            {day.tracked && day.tracked.length > 0 && (
+              <CollapsibleSection title="Tracked Work" accent={accent}>
+                {day.tracked.map((tr, i) => (
+                  <TrackedCard
+                    key={i} ex={tr} accent={accent}
+                    logs={getKeyedLogs(`tracked-${i}-`)}
+                    lastSessionLogs={getLastSessionKeyedLogs(`tracked-${i}-`)}
+                    onLogSet={(setNum, data) => handleLogKeyed(`tracked-${i}-`, setNum, data)}
+                    onStartTimer={() => timer.start(60)}
+                    onStopTimer={timer.stop}
+                  />
+                ))}
+              </CollapsibleSection>
+            )}
+
             <WorkoutSection
               exercises={day.exercises}
               accent={accent}
-              doneSets={doneSets}
-              totalSets={totalSets}
+              doneSets={exDoneSets}
+              totalSets={exTotalSets}
               activeExIdx={activeExIdx}
               getExLogs={getExLogs}
               getLastSessionExLogs={getLastSessionExLogs}
