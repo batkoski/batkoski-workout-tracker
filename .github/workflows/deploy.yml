@@ -1,0 +1,66 @@
+# Build and deploy to GitHub Pages whenever something lands on main.
+#
+# One-time repo setting required: Settings → Pages → Build and deployment →
+# Source: "GitHub Actions" (replaces the old gh-pages branch source).
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only one deploy at a time; a newer push waits for the running one to finish
+# instead of cancelling it mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # package-lock.json records every package under a private AWS CodeArtifact
+      # host, which this runner can't reach. Point the URLs at the public npm
+      # registry for this run only: same tarballs and integrity hashes, and the
+      # committed lockfile is left untouched.
+      - name: Point lockfile at the public npm registry
+        run: |
+          sed -E -i 's#https://[A-Za-z0-9.-]+\.codeartifact\.[A-Za-z0-9.-]+\.amazonaws\.com/npm/[^/]+/#https://registry.npmjs.org/#g' package-lock.json
+          if grep -q codeartifact package-lock.json; then
+            echo "Lockfile still references CodeArtifact" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+
+      # tsc -b && vite build: a type error fails here, so nothing broken deploys.
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
