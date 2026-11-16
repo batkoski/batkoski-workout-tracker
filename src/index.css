@@ -72,9 +72,27 @@
   z-index: 200;
 }
 
+/* --vv-top / --vv-height / --kb are kept in sync with the visual viewport in
+   main.tsx, so on mobile the sheet sits directly above the on-screen keyboard. */
+:root {
+  --vv-top: 0px;
+  --vv-height: 100dvh;
+  --kb: 0px;
+}
+
 @media (max-width: 768px) {
   .set-modal-overlay {
     position: fixed;
+    inset: auto 0 auto 0;
+    top: var(--vv-top);
+    height: var(--vv-height);
+  }
+
+  /* If the keyboard leaves less room than the sheet needs, scroll the sheet
+     instead of pushing its fields off-screen. */
+  .set-modal-overlay > * {
+    max-height: 100%;
+    overflow-y: auto;
   }
 }
 .app-outer {
@@ -129,5 +147,10 @@
     border-radius: 0;
     border: none;
     box-shadow: none;
+  }
+
+  /* Room to scroll a note field at the very bottom above the keyboard. */
+  .app-scroll {
+    padding-bottom: calc(48px + var(--kb));
   }
 }

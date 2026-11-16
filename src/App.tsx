@@ -230,7 +230,7 @@ const PISTOL_SKILL: SkillExercise[] = [
   {
     name: "Box Pistol", sets: 3, reps: "8/side",
     hasBox: true, hasCounterbalance: true,
-    note: "Weaker side first. Box height (inches) is the progression variable — stay at the current height until you hit 3×8 on both sides, then drop it. Eccentrics first at a new height. Elevate the heel if ankle mobility limits depth; pelvis neutral. Last logged: 16\" box, 7/7 and 6/6 (10/5).",
+    note: "Weaker side first. Box height (inches) is the progression variable — stay at the current height until you hit 3×8 on both sides, then drop it. Eccentrics first at a new height. Elevate the heel if ankle mobility limits depth; pelvis neutral. Last logged: 20\" box, 10/10, 10/10, 8/8 (10/19). While the left hip/hip flexor is grumpy, use a higher box (22–24\") or swap for split squats.",
   },
 ];
 
@@ -263,32 +263,34 @@ const PM_ROUTINE: WarmupItem[] = [
 // them after the month off.
 const LIFT_A: Exercise[] = [
   { name: "Leg Press", sets: 3, reps: "8", restSeconds: 90,
-    note: "Last logged: 230×8–10 (9/14), 270×7 (9/7). Controlled depth, pelvis stays flat on the pad." },
+    note: "Last logged: 250×10 (10/26). 11/16 went light (180×13) for a left hip/hip-flexor pinch. If the front of the hip pinches at the bottom, put your feet higher on the platform and stop before the pelvis tucks. Tingling or anything running down the leg = stop loading legs and get it checked." },
   { name: "Neutral-Grip Pulldown", sets: 3, reps: "8-10", restSeconds: 90,
-    note: "Last logged: 145×8–10 (9/7). Drive elbows to ribs, ribs down, no swinging." },
+    note: "Last logged: 145×10,9,8 (10/26). Drive elbows to ribs, ribs down, no swinging." },
   { name: "Barbell Bench Press", sets: 3, reps: "5-6", restSeconds: 120,
-    note: "Last logged: 185×8,7,6 (9/7). Shoulder blades back and down, feet planted. Set the safety pins when lifting without a spotter." },
+    note: "Last logged: 185×7,7,5 (11/16). Shoulder blades back and down, feet planted. Set the safety pins when lifting without a spotter." },
   { name: "Chest-Supported DB Row", sets: 2, reps: "10-12", restSeconds: 90,
     note: "Last logged: 45s×11–12 (8/31). Chest stays on the pad; squeeze the shoulder blades together without shrugging." },
   { name: "Biceps Curl (incline DB or curved bar)", sets: 2, reps: "10-12",
     note: "Incline DB version when a bench is free (last logged 25×10, 8/31); curved bar otherwise. Log the load you used so weeks compare." },
   { name: "Rope Pushdown", sets: 2, reps: "10-12",
-    note: "Last logged: 60×10 (8/24). Elbows pinned to your sides." },
+    note: "Last logged: 60×10 (8/24). Elbows pinned to your sides. Replaces overhead/standing skull crushers — overhead extension puts the left shoulder in the position it dislikes." },
 ];
 
 const LIFT_B: Exercise[] = [
   { name: "Neutral-Grip Incline DB Press", sets: 3, reps: "8", restSeconds: 90,
-    note: "Palms facing each other, elbows ~45° from the torso. Last logged (palms forward): 65×10,9,6 (9/7); neutral grip usually runs 5–10 lb lighter. Left shoulder: stop the set at any pinch at the front or top." },
+    note: "Palms facing each other, elbows ~45° from the torso. Last logged: 55×8,8,8 (10/19). Left shoulder: stop the set at any pinch at the front or top." },
   { name: "Landmine Row", sets: 3, reps: "8", restSeconds: 90,
-    note: "Last logged: 125×8–10 (9/7). Hinge from the hips, flat back. If your low back (not your lats) is what's limiting you, swap to a chest-supported row." },
+    note: "Last logged: 115×9 (10/19). Hinge from the hips, flat back. If your low back (not your lats) is what's limiting you, swap to a chest-supported row." },
   { name: "Leg Press", sets: 2, reps: "8", restSeconds: 90,
     note: "Same load as Lift A or slightly lighter." },
   { name: "Leg Extension", sets: 2, reps: "12",
-    note: "Last logged: 105×14–16 (9/7). Squeeze at the top, slow lowering." },
+    note: "Last logged: 100×12 (10/19). Squeeze at the top, slow lowering." },
   { name: "Face Pull", sets: 2, reps: "15",
-    note: "Working weight ~27.5. High elbows, finish with external rotation. Shoulder-friendly rear-delt and rotator cuff work." },
+    note: "Last logged: 40×15 (10/19). High elbows, finish with external rotation. Shoulder-friendly rear-delt and rotator cuff work." },
   { name: "Biceps Curl (incline DB or curved bar)", sets: 2, reps: "12",
-    note: "Light and clean. Log the load you used." },
+    note: "Last logged: 25×10 incline DB (10/19). Light and clean. Log the load you used." },
+  { name: "Rope Pushdown", sets: 2, reps: "12-15",
+    note: "Triceps volume for the week. Same load as Lift A or slightly lighter. Elbows pinned to your sides." },
 ];
 
 // ── FUNCTIONAL DAYS ──────────────────────────────────────────────────────────
@@ -298,11 +300,11 @@ const CORE_TSPINE: Exercise[] = [
   { name: "Ab Wheel Rollout (from knees)", sets: 3, reps: "6-10",
     note: "Ribs down, glutes squeezed. End the set when your low back starts to sag; shorten the range if it sags before rep 6." },
   { name: "Pallof Press", sets: 3, reps: "10/side", unilateral: true,
-    note: "Last logged: 22.5. Press out and hold 2 seconds — resist the cable rotating you. Weaker side first." },
+    note: "Last logged: 29×12 (11/9). Press out and hold 2 seconds — resist the cable rotating you. Weaker side first." },
   { name: "Side Plank + Top-Leg Raise", sets: 3, reps: "30-40s/side", unilateral: true,
     note: "Same lateral chain as the Copenhagen plank. Log the shorter side's time. Weaker side first." },
   { name: "Dead Bug", sets: 2, reps: "8/side", unilateral: true,
-    note: "Slow. Low back stays pressed into the floor; exhale as the leg extends." },
+    note: "Slow. Low back stays pressed into the floor; exhale as the leg extends. Last logged: 13/side bodyweight (11/9). Progression, in order: 4-second lowering → straight legs (longer lever) → hold a 10 lb plate with arms locked out." },
   { name: "Suspension \"W\" Hold", sets: 3, reps: "20-25s",
     note: "Pull into a W, squeeze the low traps, shoulder blades down and back." },
   { name: "Suspension Extended Fly Hold", sets: 3, reps: "20-25s",
@@ -324,17 +326,17 @@ const HIPS_FUNCTIONAL: Exercise[] = [
 
 const AESTHETIC_CORE: Exercise[] = [
   { name: "Kneeling Cable Crunch", sets: 3, reps: "10-15",
-    note: "Curl ribs toward pelvis with hips fixed — don't pull with the arms. Start light, add a little weight each week once form is clean. Stop if the low back protests." },
+    note: "Curl ribs toward pelvis with hips fixed — don't pull with the arms. Last logged: 47.5→57.5 ×15 (10/19), so start at 57.5–62.5. Add a little weight each week once form is clean. Stop if the low back protests." },
   { name: "Knee Raise (hanging or captain's chair)", sets: 3, reps: "10-12",
     note: "Curl the pelvis up instead of swinging the legs. Slow lowering." },
   { name: "Suspension Fallout / Body Saw", sets: 3, reps: "8-10",
-    note: "Anti-extension: ribs down, glutes squeezed. Shorten the lever if the low back sags." },
+    note: "Anti-extension: ribs down, glutes squeezed. Shorten the lever if the low back sags. Last logged: 10, 8, then a missed third set (10/19) — do 2 sets or a shorter range until 3×8 is doable." },
   { name: "Cable Chop", sets: 2, reps: "12/side", unilateral: true,
     note: "Rotate from the hips and thoracic spine, not the low back. Weaker side first." },
   { name: "Suspension Row", sets: 2, reps: "10-12",
     note: "Body in a straight line, pull the chest to the handles, shoulder blades down and back." },
-  { name: "Suspension Anchor Push-Up", sets: 2, reps: "10-12",
-    note: "Slow lowering. Stop short of any pinch in the left shoulder." },
+  { name: "Feet-Elevated Push-Up", sets: 2, reps: "10-12",
+    note: "Replaces the suspension anchor push-up (and dips — loaded shoulder extension aggravates the left-shoulder impingement). Feet on a bench, body in a straight line, ribs down: same anti-extension demand. Progress with a plate on your back. Slow lowering; stop short of any pinch in the left shoulder." },
   { name: "Bear Crawl", sets: 2, reps: "20-30s",
     note: "Knees an inch off the floor, move slowly or hold a hover. Log the seconds." },
 ];
