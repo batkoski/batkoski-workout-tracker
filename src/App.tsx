@@ -91,6 +91,7 @@ interface SetData {
   valueL?: string;         // tracked-exercise value (time/reps), left side
   valueR?: string;         // tracked-exercise value, right side
   value?: string;          // tracked-exercise value, bilateral
+  at?: string;             // ISO timestamp when the set was logged (sets logged from 11/16/2026 on)
 }
 
 // { "exIdx-setNum": SetData }
@@ -230,7 +231,7 @@ const PISTOL_SKILL: SkillExercise[] = [
   {
     name: "Box Pistol", sets: 3, reps: "8/side",
     hasBox: true, hasCounterbalance: true,
-    note: "Weaker side first. Box height (inches) is the progression variable — stay at the current height until you hit 3×8 on both sides, then drop it. Eccentrics first at a new height. Elevate the heel if ankle mobility limits depth; pelvis neutral. Last logged: 20\" box, 10/10, 10/10, 8/8 (10/19). While the left hip/hip flexor is grumpy, use a higher box (22–24\") or swap for split squats.",
+    note: "Weaker side first. Box height (inches) is the progression variable — stay at the current height until you hit 3×8 on both sides, then drop it. Eccentrics first at a new height. Elevate the heel if ankle mobility limits depth; pelvis neutral. While the left hip/hip flexor is grumpy, use a higher box (22–24\") or swap for split squats.",
   },
 ];
 
@@ -259,36 +260,34 @@ const PM_ROUTINE: WarmupItem[] = [
 // Muscle-retention work, ~45 min: straight sets on one station at a time (no
 // machine-hogging supersets). Stop each set 1–2 reps short of failure; keep the same
 // exercises week to week and progress load once the top of the rep range is easy.
-// "Last logged" numbers come from the Sept 2026 history so week 1 can start ~85–90% of
-// them after the month off.
 const LIFT_A: Exercise[] = [
   { name: "Leg Press", sets: 3, reps: "8", restSeconds: 90,
-    note: "Last logged: 250×10 (10/26). 11/16 went light (180×13) for a left hip/hip-flexor pinch. If the front of the hip pinches at the bottom, put your feet higher on the platform and stop before the pelvis tucks. Tingling or anything running down the leg = stop loading legs and get it checked." },
+    note: "Left hip/hip flexor: if the front of the hip pinches at the bottom, put your feet higher on the platform and stop before the pelvis tucks. Tingling or anything running down the leg = stop loading legs and get it checked." },
   { name: "Neutral-Grip Pulldown", sets: 3, reps: "8-10", restSeconds: 90,
-    note: "Last logged: 145×10,9,8 (10/26). Drive elbows to ribs, ribs down, no swinging." },
+    note: "Drive elbows to ribs, ribs down, no swinging." },
   { name: "Barbell Bench Press", sets: 3, reps: "5-6", restSeconds: 120,
-    note: "Last logged: 185×7,7,5 (11/16). Shoulder blades back and down, feet planted. Set the safety pins when lifting without a spotter." },
+    note: "Shoulder blades back and down, feet planted. Set the safety pins when lifting without a spotter." },
   { name: "Chest-Supported DB Row", sets: 2, reps: "10-12", restSeconds: 90,
-    note: "Last logged: 45s×11–12 (8/31). Chest stays on the pad; squeeze the shoulder blades together without shrugging." },
+    note: "Chest stays on the pad; squeeze the shoulder blades together without shrugging." },
   { name: "Biceps Curl (incline DB or curved bar)", sets: 2, reps: "10-12",
-    note: "Incline DB version when a bench is free (last logged 25×10, 8/31); curved bar otherwise. Log the load you used so weeks compare." },
+    note: "Incline DB version when a bench is free; curved bar otherwise. Log the load you used so weeks compare." },
   { name: "Rope Pushdown", sets: 2, reps: "10-12",
-    note: "Last logged: 60×10 (8/24). Elbows pinned to your sides. Replaces overhead/standing skull crushers — overhead extension puts the left shoulder in the position it dislikes." },
+    note: "Elbows pinned to your sides. Replaces overhead/standing skull crushers — overhead extension puts the left shoulder in the position it dislikes." },
 ];
 
 const LIFT_B: Exercise[] = [
   { name: "Neutral-Grip Incline DB Press", sets: 3, reps: "8", restSeconds: 90,
-    note: "Palms facing each other, elbows ~45° from the torso. Last logged: 55×8,8,8 (10/19). Left shoulder: stop the set at any pinch at the front or top." },
+    note: "Palms facing each other, elbows ~45° from the torso. Left shoulder: stop the set at any pinch at the front or top." },
   { name: "Landmine Row", sets: 3, reps: "8", restSeconds: 90,
-    note: "Last logged: 115×9 (10/19). Hinge from the hips, flat back. If your low back (not your lats) is what's limiting you, swap to a chest-supported row." },
+    note: "Hinge from the hips, flat back. If your low back (not your lats) is what's limiting you, swap to a chest-supported row." },
   { name: "Leg Press", sets: 2, reps: "8", restSeconds: 90,
     note: "Same load as Lift A or slightly lighter." },
   { name: "Leg Extension", sets: 2, reps: "12",
-    note: "Last logged: 100×12 (10/19). Squeeze at the top, slow lowering." },
+    note: "Squeeze at the top, slow lowering." },
   { name: "Face Pull", sets: 2, reps: "15",
-    note: "Last logged: 40×15 (10/19). High elbows, finish with external rotation. Shoulder-friendly rear-delt and rotator cuff work." },
+    note: "High elbows, finish with external rotation. Shoulder-friendly rear-delt and rotator cuff work." },
   { name: "Biceps Curl (incline DB or curved bar)", sets: 2, reps: "12",
-    note: "Last logged: 25×10 incline DB (10/19). Light and clean. Log the load you used." },
+    note: "Light and clean. Log the load you used." },
   { name: "Rope Pushdown", sets: 2, reps: "12-15",
     note: "Triceps volume for the week. Same load as Lift A or slightly lighter. Elbows pinned to your sides." },
 ];
@@ -300,11 +299,11 @@ const CORE_TSPINE: Exercise[] = [
   { name: "Ab Wheel Rollout (from knees)", sets: 3, reps: "6-10",
     note: "Ribs down, glutes squeezed. End the set when your low back starts to sag; shorten the range if it sags before rep 6." },
   { name: "Pallof Press", sets: 3, reps: "10/side", unilateral: true,
-    note: "Last logged: 29×12 (11/9). Press out and hold 2 seconds — resist the cable rotating you. Weaker side first." },
+    note: "Press out and hold 2 seconds — resist the cable rotating you. Weaker side first." },
   { name: "Side Plank + Top-Leg Raise", sets: 3, reps: "30-40s/side", unilateral: true,
     note: "Same lateral chain as the Copenhagen plank. Log the shorter side's time. Weaker side first." },
   { name: "Dead Bug", sets: 2, reps: "8/side", unilateral: true,
-    note: "Slow. Low back stays pressed into the floor; exhale as the leg extends. Last logged: 13/side bodyweight (11/9). Progression, in order: 4-second lowering → straight legs (longer lever) → hold a 10 lb plate with arms locked out." },
+    note: "Slow. Low back stays pressed into the floor; exhale as the leg extends. Progression, in order: 4-second lowering → straight legs (longer lever) → hold a 10 lb plate with arms locked out." },
   { name: "Suspension \"W\" Hold", sets: 3, reps: "20-25s",
     note: "Pull into a W, squeeze the low traps, shoulder blades down and back." },
   { name: "Suspension Extended Fly Hold", sets: 3, reps: "20-25s",
@@ -326,11 +325,11 @@ const HIPS_FUNCTIONAL: Exercise[] = [
 
 const AESTHETIC_CORE: Exercise[] = [
   { name: "Kneeling Cable Crunch", sets: 3, reps: "10-15",
-    note: "Curl ribs toward pelvis with hips fixed — don't pull with the arms. Last logged: 47.5→57.5 ×15 (10/19), so start at 57.5–62.5. Add a little weight each week once form is clean. Stop if the low back protests." },
+    note: "Curl ribs toward pelvis with hips fixed — don't pull with the arms. If all 3 sets hit 15 easily, start heavier next time. Add a little weight each week once form is clean. Stop if the low back protests." },
   { name: "Knee Raise (hanging or captain's chair)", sets: 3, reps: "10-12",
     note: "Curl the pelvis up instead of swinging the legs. Slow lowering." },
   { name: "Suspension Fallout / Body Saw", sets: 3, reps: "8-10",
-    note: "Anti-extension: ribs down, glutes squeezed. Shorten the lever if the low back sags. Last logged: 10, 8, then a missed third set (10/19) — do 2 sets or a shorter range until 3×8 is doable." },
+    note: "Anti-extension: ribs down, glutes squeezed. Shorten the lever if the low back sags. If the third set falls apart, do 2 sets or a shorter range until 3×8 is doable." },
   { name: "Cable Chop", sets: 2, reps: "12/side", unilateral: true,
     note: "Rotate from the hips and thoracic spine, not the low back. Weaker side first." },
   { name: "Suspension Row", sets: 2, reps: "10-12",
@@ -370,8 +369,8 @@ const PROGRAM_DAYS: ProgramDay[] = [
     warmup: FUNCTIONAL_WARMUP,
     skill: PISTOL_SKILL,
     tracked: [
-      { name: "Copenhagen Plank", sets: 3, target: "30–40s each side", unilateral: true, metric: "time", note: "Last logged: L 40 / R 38–40 (10/5). Bottom knee can touch the floor to reduce load. Weaker side first." },
-      { name: "Single-Leg Glute Bridge", sets: 3, target: "12 each side", unilateral: true, metric: "reps", note: "Last logged: 12/12/12 both sides (10/5). Keep the pelvis level — don't let one side drop. Weaker side first." },
+      { name: "Copenhagen Plank", sets: 3, target: "30–40s each side", unilateral: true, metric: "time", note: "Bottom knee can touch the floor to reduce load. Weaker side first." },
+      { name: "Single-Leg Glute Bridge", sets: 3, target: "12 each side", unilateral: true, metric: "reps", note: "Keep the pelvis level — don't let one side drop. Weaker side first." },
     ],
     exercises: HIPS_FUNCTIONAL,
     pm: PM_ROUTINE,
@@ -444,8 +443,9 @@ function weekKey(): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Date of the session a "last logged" result came from, attached to the returned
-// logs object so cards can show it without extra prop plumbing.
+// Scheduled date of the session a "last logged" result came from (fallback for
+// sets saved before timestamps existed), attached to the returned logs object so
+// cards can show it without extra prop plumbing.
 const LAST_SESSION_DATE = new WeakMap<object, string>();
 
 // Storage keys look like "2026-11-09|0": the week's Monday, then the program day
@@ -457,9 +457,15 @@ function sessionDateLabel(storageKey: string): string {
   return Number.isNaN(dt.getTime()) ? "" : `${dt.getMonth() + 1}/${dt.getDate()}`;
 }
 
-function LastLoggedLine({ logs, summary }: { logs: object | null; summary: string | null }) {
+function LastLoggedLine({ logs, summary }: { logs: { [setNum: number]: SetData } | null; summary: string | null }) {
   if (!logs || !summary) return null;
-  const date = LAST_SESSION_DATE.get(logs);
+  // Prefer the real time the sets were logged; older sets have no timestamp, so
+  // fall back to the scheduled day for that week.
+  const stamps = Object.values(logs).map(v => v.at).filter((t): t is string => !!t).sort();
+  const latest = stamps.length ? new Date(stamps[stamps.length - 1]!) : null;
+  const date = latest && !Number.isNaN(latest.getTime())
+    ? `${latest.getMonth() + 1}/${latest.getDate()}`
+    : LAST_SESSION_DATE.get(logs);
   return (
     <div style={{ marginTop: "4px", color: "#7A7268", fontSize: "11px" }}>
       Last{date ? ` (${date})` : ""}: <span style={{ fontFamily: "'Space Mono', monospace", color: "#5A5248" }}>{summary}</span>
@@ -1984,7 +1990,7 @@ function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps
   };
 
   return (
-    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(60,50,40,0.7)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }}>
+    <div onClick={onClose} className="dialog-backdrop" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#DDD7CC", border: "1px solid #7A7268", borderRadius: "20px 20px 0 0", padding: "24px 24px 48px", width: "100%", maxWidth: "480px", maxHeight: "70vh", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div>
@@ -2141,7 +2147,7 @@ export default function App() {
     const key = `${prefix}${setNum}`;
     setAllLogs(prev => ({
       ...prev,
-      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), [key]: data },
+      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), [key]: { ...data, at: new Date().toISOString() } },
     }));
   };
 
@@ -2168,7 +2174,7 @@ export default function App() {
     const key = `${exIdx}-${setNum}`;
     setAllLogs(prev => ({
       ...prev,
-      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), [key]: data },
+      [dayStorageKey]: { ...(prev[dayStorageKey] || {}), [key]: { ...data, at: new Date().toISOString() } },
     }));
     if (!day) return;
     const ex = day.exercises[exIdx];

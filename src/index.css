@@ -62,10 +62,18 @@
 }
 
 /* ── SET MODAL: absolute on desktop (stays in card), fixed on mobile (clears keyboard) ── */
+/* Dimmed, blurred backdrop behind every dialog. The tint is lighter than a plain
+   overlay so the blur reads; -webkit- prefix is still needed on iOS Safari. */
+.dialog-backdrop,
+.set-modal-overlay {
+  background: rgba(60,50,40,0.35);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
 .set-modal-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(60,50,40,0.7);
   display: flex;
   align-items: flex-end;
   justify-content: center;
