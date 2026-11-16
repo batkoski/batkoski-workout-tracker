@@ -18,6 +18,10 @@ interface Exercise {
   unilateral?: boolean;
   // Isometric hold — log an optional hold duration instead of weight/reps.
   isHold?: boolean;
+  // Bodyweight movement — log reps, with added load optional (a plate, a vest).
+  bodyweight?: boolean;
+  // Label for the reps field when it isn't reps (e.g. distance on carries).
+  repsLabel?: string;
   // Rest timer length after a logged set, in seconds. Defaults to 60.
   restSeconds?: number;
 }
@@ -296,45 +300,45 @@ const LIFT_B: Exercise[] = [
 // Core strength, t-spine, hips, and aesthetic core work. Holds are logged in seconds,
 // weaker side first on anything unilateral (log the shorter side when a set covers both).
 const CORE_TSPINE: Exercise[] = [
-  { name: "Ab Wheel Rollout (from knees)", sets: 3, reps: "6-10",
+  { name: "Ab Wheel Rollout (from knees)", sets: 3, reps: "6-10", bodyweight: true,
     note: "Ribs down, glutes squeezed. End the set when your low back starts to sag; shorten the range if it sags before rep 6." },
   { name: "Pallof Press", sets: 3, reps: "10/side", unilateral: true,
     note: "Press out and hold 2 seconds — resist the cable rotating you. Weaker side first." },
   { name: "Side Plank + Top-Leg Raise", sets: 3, reps: "30-40s/side", unilateral: true,
     note: "Same lateral chain as the Copenhagen plank. Log the shorter side's time. Weaker side first." },
-  { name: "Dead Bug", sets: 2, reps: "8/side", unilateral: true,
+  { name: "Dead Bug", sets: 2, reps: "8/side", unilateral: true, bodyweight: true,
     note: "Slow. Low back stays pressed into the floor; exhale as the leg extends. Progression, in order: 4-second lowering → straight legs (longer lever) → hold a 10 lb plate with arms locked out." },
   { name: "Suspension \"W\" Hold", sets: 3, reps: "20-25s",
     note: "Pull into a W, squeeze the low traps, shoulder blades down and back." },
   { name: "Suspension Extended Fly Hold", sets: 3, reps: "20-25s",
     note: "Longer lever than the fly hold — brace the core, shoulder blades stay down." },
-  { name: "Foam Roller T-Spine Extension", sets: 2, reps: "8",
+  { name: "Foam Roller T-Spine Extension", sets: 2, reps: "8", bodyweight: true,
     note: "Roller across the mid-back, hands behind the head, extend over it one segment at a time. Ribs down so the extension comes from the t-spine, not the low back." },
 ];
 
 const HIPS_FUNCTIONAL: Exercise[] = [
-  { name: "Cossack Squat", sets: 2, reps: "8/side", unilateral: true,
+  { name: "Cossack Squat", sets: 2, reps: "8/side", unilateral: true, bodyweight: true,
     note: "Sit toward one side with the other leg straight; hold a light weight in front for counterbalance if depth is limited. Go only as deep as it stays smooth — a pulling feeling down the back of the leg means ease off." },
   { name: "Deep Squat Hold + T-Spine Reach", sets: 2, reps: "45s hold",
     note: "Heels down, chest tall. Alternate reaching an arm to the ceiling and rotating through the upper back." },
-  { name: "90/90 Hip Lift-Off", sets: 2, reps: "6/side", unilateral: true,
+  { name: "90/90 Hip Lift-Off", sets: 2, reps: "6/side", unilateral: true, bodyweight: true,
     note: "From 90/90 sitting, lift the front shin off the floor using hip rotation strength, not momentum. Weaker side first." },
-  { name: "Suitcase Carry", sets: 3, reps: "30 m/side", unilateral: true, restSeconds: 90,
-    note: "Log the load as weight and the distance per side as reps. Start light (about 40–50 lb). Stay tall — don't lean toward the loaded side. Stop if the low back complains." },
+  { name: "Suitcase Carry", sets: 3, reps: "30 m/side", unilateral: true, repsLabel: "METERS / SIDE", restSeconds: 90,
+    note: "Start light (about 40–50 lb). Stay tall — don't lean toward the loaded side. Stop if the low back complains." },
 ];
 
 const AESTHETIC_CORE: Exercise[] = [
   { name: "Kneeling Cable Crunch", sets: 3, reps: "10-15",
     note: "Curl ribs toward pelvis with hips fixed — don't pull with the arms. If all 3 sets hit 15 easily, start heavier next time. Add a little weight each week once form is clean. Stop if the low back protests." },
-  { name: "Knee Raise (hanging or captain's chair)", sets: 3, reps: "10-12",
+  { name: "Knee Raise (hanging or captain's chair)", sets: 3, reps: "10-12", bodyweight: true,
     note: "Curl the pelvis up instead of swinging the legs. Slow lowering." },
-  { name: "Suspension Fallout / Body Saw", sets: 3, reps: "8-10",
+  { name: "Suspension Fallout / Body Saw", sets: 3, reps: "8-10", bodyweight: true,
     note: "Anti-extension: ribs down, glutes squeezed. Shorten the lever if the low back sags. If the third set falls apart, do 2 sets or a shorter range until 3×8 is doable." },
   { name: "Cable Chop", sets: 2, reps: "12/side", unilateral: true,
     note: "Rotate from the hips and thoracic spine, not the low back. Weaker side first." },
-  { name: "Suspension Row", sets: 2, reps: "10-12",
+  { name: "Suspension Row", sets: 2, reps: "10-12", bodyweight: true,
     note: "Body in a straight line, pull the chest to the handles, shoulder blades down and back." },
-  { name: "Feet-Elevated Push-Up", sets: 2, reps: "10-12",
+  { name: "Feet-Elevated Push-Up", sets: 2, reps: "10-12", bodyweight: true,
     note: "Replaces the suspension anchor push-up (and dips — loaded shoulder extension aggravates the left-shoulder impingement). Feet on a bench, body in a straight line, ribs down: same anti-extension demand. Progress with a plate on your back. Slow lowering; stop short of any pinch in the left shoulder." },
   { name: "Bear Crawl", sets: 2, reps: "20-30s",
     note: "Knees an inch off the floor, move slowly or hold a hover. Log the seconds." },
@@ -422,6 +426,19 @@ function todayKey(): string {
 
 // True when an exercise's rep spec describes an isometric hold rather than reps.
 // Matches "15s hold", "15s/side", "20 sec", etc.
+// True when a logged weight is real added load, not a placeholder ("", "–", "0").
+function hasLoad(w?: string): boolean {
+  if (!w) return false;
+  const t = w.trim();
+  return t !== "" && t !== "–" && t !== "-" && Number(t) !== 0;
+}
+
+// Compact set label for cards: "185×7" with load, just "12" for bodyweight/holds.
+function fmtWeightReps(v: SetData): string {
+  if (hasLoad(v.weight)) return `${v.weight}×${v.reps || "?"}`;
+  return v.reps || "";
+}
+
 function isHoldReps(reps: string): boolean {
   return /hold/i.test(reps) || /\d+\s*s(ec)?\b/i.test(reps) || /\d+\s*s\//i.test(reps);
 }
@@ -542,16 +559,20 @@ interface SetModalProps {
   exerciseName: string;
   isHold?: boolean;
   holdDefault?: string; // target seconds, e.g. "15"
+  bodyweight?: boolean;
+  repsLabel?: string;
 }
 
-function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName, isHold, holdDefault }: SetModalProps) {
+function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName, isHold, holdDefault, bodyweight, repsLabel }: SetModalProps) {
   const [weight, setWeight] = useState<string | null>(null);
   const [reps,   setReps]   = useState<string | null>(null);
   const [hold,   setHold]   = useState<string | null>(null);
 
-  const displayWeight = weight ?? suggested?.weight ?? "";
+  // Bodyweight: only carry over real added load, never a "–"/"0" placeholder.
+  const suggestedWeight = bodyweight ? (hasLoad(suggested?.weight) ? suggested!.weight : "") : suggested?.weight;
+  const displayWeight = weight ?? suggestedWeight ?? "";
   const displayReps   = reps   ?? suggested?.reps   ?? "";
-  const weightIsDefault = weight === null && !!suggested?.weight;
+  const weightIsDefault = weight === null && !!suggestedWeight;
   const repsIsDefault   = reps   === null && !!suggested?.reps;
 
   // For hold exercises, pre-fill from the last logged hold, else the target.
@@ -562,6 +583,11 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName,
     if (isHold) {
       const secs = (hold ?? suggestedHold ?? "").toString().trim();
       onSave({ weight: "", reps: secs ? `${secs}s` : "✓" });
+      return;
+    }
+    if (bodyweight) {
+      const added = (weight ?? suggestedWeight ?? "").toString().trim();
+      onSave({ weight: hasLoad(added) ? added : "", reps: reps ?? suggested?.reps ?? "–" });
       return;
     }
     onSave({
@@ -610,14 +636,15 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName,
             </div>
           </>
         ) : (
-        <div style={{ display: "flex", gap: "12px", marginBottom: "8px" }}>
-          {/* WEIGHT */}
+        <div style={{ display: "flex", gap: "12px", marginBottom: "8px", flexDirection: bodyweight ? "row-reverse" : "row" }}>
+          {/* WEIGHT (optional added load on bodyweight movements) */}
           <div style={{ flex: 1 }}>
-            <label style={{ color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" }}>WEIGHT (lbs)</label>
+            <label style={{ color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" }}>{bodyweight ? "ADDED LBS — optional" : "WEIGHT (lbs)"}</label>
             <input
               type="number" inputMode="decimal"
               value={displayWeight}
-              autoFocus
+              placeholder={bodyweight ? "BW" : undefined}
+              autoFocus={!bodyweight}
               onFocus={e => e.target.select()}
               onChange={e => setWeight(e.target.value)}
               style={{
@@ -633,10 +660,11 @@ function SetModal({ setNum, totalSets, suggested, onSave, onClose, exerciseName,
           </div>
           {/* REPS */}
           <div style={{ flex: 1 }}>
-            <label style={{ color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" }}>REPS</label>
+            <label style={{ color: "#5A5248", fontSize: "11px", display: "block", marginBottom: "8px", letterSpacing: "0.08em" }}>{repsLabel ?? "REPS"}</label>
             <input
               type="number" inputMode="decimal"
               value={displayReps}
+              autoFocus={bodyweight}
               onFocus={e => e.target.select()}
               onChange={e => setReps(e.target.value)}
               style={{
@@ -855,7 +883,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
   const lastSessionSummary = lastSessionLogs
     ? Object.entries(lastSessionLogs)
         .sort(([a], [b]) => Number(a) - Number(b))
-        .map(([, v]) => (v.weight && v.reps ? `${v.weight}×${v.reps}` : v.reps || v.weight || ""))
+        .map(([, v]) => fmtWeightReps(v))
         .join(", ")
     : null;
 
@@ -897,7 +925,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                   const setNum = i + 1;
                   const log = logs[setNum];
                   const valLabel = log
-                    ? (log.weight && log.reps ? `${log.weight}×${log.reps}` : log.reps || log.weight || "")
+                    ? fmtWeightReps(log)
                     : "";
                   return (
                     <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
@@ -988,7 +1016,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                     </button>
                     {done && (log.weight || log.reps) && (
                       <span style={{ color: "#6A6258", fontSize: "10px", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
-                        {log.weight && log.reps ? `${log.weight}×${log.reps}` : log.reps || log.weight}
+                        {fmtWeightReps(log)}
                       </span>
                     )}
                   </div>
@@ -1026,6 +1054,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
           setNum={modal} totalSets={ex.sets} suggested={getSuggested(modal)}
           exerciseName={ex.name}
           isHold={hold} holdDefault={holdTarget}
+          bodyweight={ex.bodyweight} repsLabel={ex.repsLabel}
           onSave={data => { onLogSet(exIdx, modal, data); setModal(null); onStartTimer(exIdx, modal); }}
           onClose={() => setModal(null)}
         />
@@ -1837,8 +1866,8 @@ function ExportModal({ allLogs, coreLogs, notesLogs, onClose }: ExportModalProps
     }
     if (v.valueL !== undefined || v.valueR !== undefined) return `L ${v.valueL || "?"} / R ${v.valueR || "?"}`;
     if (v.value !== undefined) return `${v.value || "?"}`;
-    // Hold / bodyweight set: no weight, reps carries the hold time or a check.
-    if (!v.weight) return v.reps || "✓";
+    // Hold / bodyweight set: no real load. Numeric reps → "BW × 12"; holds keep "30s".
+    if (!hasLoad(v.weight)) return /^\d+(\.\d+)?$/.test(v.reps || "") ? `BW × ${v.reps}` : v.reps || "✓";
     return `${v.weight}lbs × ${v.reps || "?"}`;
   };
 
