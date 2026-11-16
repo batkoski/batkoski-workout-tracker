@@ -444,6 +444,29 @@ function weekKey(): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Date of the session a "last logged" result came from, attached to the returned
+// logs object so cards can show it without extra prop plumbing.
+const LAST_SESSION_DATE = new WeakMap<object, string>();
+
+// Storage keys look like "2026-11-09|0": the week's Monday, then the program day
+// index (0 = Mon … 4 = Fri), so the session date is Monday + index.
+function sessionDateLabel(storageKey: string): string {
+  const [wk = "", idx = "0"] = storageKey.split("|");
+  const [y = 0, m = 1, d = 1] = wk.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + (Number(idx) || 0));
+  return Number.isNaN(dt.getTime()) ? "" : `${dt.getMonth() + 1}/${dt.getDate()}`;
+}
+
+function LastLoggedLine({ logs, summary }: { logs: object | null; summary: string | null }) {
+  if (!logs || !summary) return null;
+  const date = LAST_SESSION_DATE.get(logs);
+  return (
+    <div style={{ marginTop: "4px", color: "#7A7268", fontSize: "11px" }}>
+      Last{date ? ` (${date})` : ""}: <span style={{ fontFamily: "'Space Mono', monospace", color: "#5A5248" }}>{summary}</span>
+    </div>
+  );
+}
+
 function sendNotification(title: string, body: string): void {
   if (typeof Notification === "undefined") return;
   if (Notification.permission === "granted") {
@@ -904,7 +927,7 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                   {isNext && (
                     <span style={{ color: "#7A7268", fontSize: "10px", letterSpacing: "0.08em", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
                   )}
-                  {(ex.note || lastSessionSummary) && (
+                  {ex.note && (
                     <button
                       onClick={() => setShowInfo(v => !v)}
                       style={{
@@ -919,17 +942,9 @@ function ExerciseCard({ ex, exIdx, accent, logs, lastSessionLogs, isCurrent, isN
                     >i</button>
                   )}
                 </div>
-                {showInfo && (
-                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                    {ex.note && (
-                      <div style={{ color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>
-                    )}
-                    {lastSessionSummary && (
-                      <div style={{ color: "#7A7268", fontSize: "11px" }}>
-                        Last week: <span style={{ fontFamily: "'Space Mono', monospace" }}>{lastSessionSummary}</span>
-                      </div>
-                    )}
-                  </div>
+                <LastLoggedLine logs={lastSessionLogs} summary={lastSessionSummary} />
+                {showInfo && ex.note && (
+                  <div style={{ marginTop: "8px", color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>
                 )}
               </div>
               <span style={{
@@ -1489,6 +1504,10 @@ function SkillCard({ skill, accent, logs, lastSessionLogs, onLogSet, onStartTime
     return extra ? `${lr} · ${extra}` : lr;
   };
 
+  const lastSummary = lastSessionLogs
+    ? Object.entries(lastSessionLogs).sort(([a], [b]) => Number(a) - Number(b)).map(([, v]) => fmt(v)).join(", ")
+    : null;
+
   return (
     <>
       <div style={{
@@ -1508,6 +1527,7 @@ function SkillCard({ skill, accent, logs, lastSessionLogs, onLogSet, onStartTime
                 cursor: "pointer", flexShrink: 0, color: showInfo ? "#5A5248" : "#8A7A70", fontSize: "11px", fontWeight: 700, lineHeight: 1, padding: 0,
               }}>i</button>
             </div>
+            {!allDone && <LastLoggedLine logs={lastSessionLogs} summary={lastSummary} />}
             {showInfo && skill.note && (
               <div style={{ marginTop: "8px", color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{skill.note}</div>
             )}
@@ -1725,7 +1745,7 @@ function TrackedCard({ ex, accent, logs, lastSessionLogs, onLogSet, onStartTimer
               <span style={{ color: allDone ? "#2E6B4A" : "#5A5248", fontWeight: 700, fontSize: "14px", lineHeight: 1.3 }}>
                 {allDone ? "✓ " : ""}{ex.name}
               </span>
-              {(ex.note || lastSummary) && (
+              {ex.note && (
                 <button onClick={() => setShowInfo(v => !v)} style={{
                   background: showInfo ? "#D8D2C8" : "transparent", border: `1px solid ${showInfo ? "#B8B0A8" : "#C8C0A8"}`,
                   borderRadius: "50%", width: "18px", height: "18px", display: "flex", alignItems: "center", justifyContent: "center",
@@ -1733,11 +1753,9 @@ function TrackedCard({ ex, accent, logs, lastSessionLogs, onLogSet, onStartTimer
                 }}>i</button>
               )}
             </div>
-            {showInfo && (
-              <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                {ex.note && <div style={{ color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>}
-                {lastSummary && <div style={{ color: "#7A7268", fontSize: "11px" }}>Last week: <span style={{ fontFamily: "'Space Mono', monospace" }}>{lastSummary}</span></div>}
-              </div>
+            {!allDone && <LastLoggedLine logs={lastSessionLogs} summary={lastSummary} />}
+            {showInfo && ex.note && (
+              <div style={{ marginTop: "8px", color: "#6A6258", fontSize: "12px", fontStyle: "italic", lineHeight: 1.4 }}>{ex.note}</div>
             )}
           </div>
           <span style={{
@@ -2063,7 +2081,10 @@ export default function App() {
       Object.entries(dayLogs).forEach(([k, v]) => {
         if (k.startsWith(`${exIdx}-`)) result[parseInt(k.split("-")[1]!)] = v;
       });
-      if (Object.keys(result).length > 0) return result;
+      if (Object.keys(result).length > 0) {
+        LAST_SESSION_DATE.set(result, sessionDateLabel(key));
+        return result;
+      }
     }
     return null;
   };
@@ -2108,7 +2129,10 @@ export default function App() {
           if (!Number.isNaN(setNum)) result[setNum] = v;
         }
       });
-      if (Object.keys(result).length > 0) return result;
+      if (Object.keys(result).length > 0) {
+        LAST_SESSION_DATE.set(result, sessionDateLabel(key));
+        return result;
+      }
     }
     return null;
   };
